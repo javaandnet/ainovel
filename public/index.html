@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 小说平台</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, sans-serif; background: #0f1419; color: #e7e9ea; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+  .container { text-align: center; padding: 40px 20px; }
+  h1 { font-size: 28px; margin-bottom: 8px; }
+  p { color: #7f8c8d; margin-bottom: 32px; }
+  .links { display: flex; flex-direction: column; gap: 16px; max-width: 300px; margin: 0 auto; }
+  .link-card { display: block; padding: 20px; background: #1a252f; border-radius: 12px; text-decoration: none; color: #ecf0f1; border: 1px solid #2c3e50; transition: all 0.2s; }
+  .link-card:hover { border-color: #3498db; transform: translateY(-2px); }
+  .link-card .icon { font-size: 32px; margin-bottom: 8px; }
+  .link-card .title { font-size: 16px; font-weight: 600; }
+  .link-card .desc { font-size: 12px; color: #7f8c8d; margin-top: 4px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>📚 AI 小说平台</h1>
+  <p>阅读 · 管理 · 学习</p>
+  <div class="links">
+    <a class="link-card" href="/admin/">
+      <div class="icon">⚙️</div>
+      <div class="title">小说管理</div>
+      <div class="desc">列举、追加、删除章节，命令式操作</div>
+    </a>
+    <a class="link-card" href="/novel/">
+      <div class="icon">📖</div>
+      <div class="title">小说阅读</div>
+      <div class="desc">TTS 朗读、AI 问答、学习模式</div>
+    </a>
+  </div>
+</div>
+</body>
+</html>

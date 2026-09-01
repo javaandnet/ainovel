@@ -1,0 +1,237 @@
+/* ===== 阅读模式（TTS）样式：悬浮工具栏 + 底部控制面板 + 逐句高亮 ===== */
+/* 由 reader.js 动态注入；更新本文件后立即对所有已发布页面生效，无需重新发布小说 */
+
+/* 悬浮工具栏（右下角圆形按钮组） */
+.reader-toolbar {
+    position: fixed; right: 20px; bottom: 20px; z-index: 1000;
+    display: flex; flex-direction: column; gap: 12px;
+}
+.toolbar-btn {
+    width: 52px; height: 52px; border-radius: 50%;
+    background: #3498db; color: #fff; border: none;
+    font-size: 22px; cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+    display: flex; align-items: center; justify-content: center;
+    transition: transform 0.15s, background 0.2s;
+}
+.toolbar-btn:hover { background: #2980b9; transform: scale(1.08); }
+.toolbar-btn:active { transform: scale(0.95); }
+
+/* 保留旧类名兼容（tts-fab 现在指向工具栏内的朗读按钮） */
+.tts-fab {
+    width: 52px; height: 52px; border-radius: 50%;
+    background: #3498db; color: #fff; border: none;
+    font-size: 22px; cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+    display: flex; align-items: center; justify-content: center;
+    transition: transform 0.15s, background 0.2s;
+}
+.tts-fab:hover { background: #2980b9; transform: scale(1.08); }
+.tts-panel {
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: 0;
+    width: 100%; max-width: 800px; box-sizing: border-box;
+    background: #2c3e50; color: #ecf0f1; padding: 12px 16px;
+    border-radius: 12px 12px 0 0; box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);
+    z-index: 1001; display: none; font-size: 14px;
+}
+.tts-panel.open { display: block; }
+.tts-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tts-row + .tts-row { margin-top: 8px; }
+.tts-btn {
+    background: #34495e; border: none; color: #ecf0f1;
+    border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 14px;
+}
+.tts-btn:hover { background: #46627f; }
+.tts-btn.primary { background: #3498db; }
+.tts-btn.primary:hover { background: #2f89c5; }
+.tts-progress {
+    flex: 1; min-width: 140px; color: #bdc3c7; font-size: 13px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* 可拖动进度条 */
+.tts-progress-bar {
+    flex: 1; min-width: 120px; height: 6px;
+    -webkit-appearance: none; appearance: none;
+    background: #46627f; border-radius: 3px; outline: none;
+    cursor: pointer;
+}
+.tts-progress-bar::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 16px; height: 16px; border-radius: 50%;
+    background: #3498db; cursor: pointer;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+}
+.tts-progress-bar::-moz-range-thumb {
+    width: 16px; height: 16px; border-radius: 50%; border: none;
+    background: #3498db; cursor: pointer;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+}
+.tts-progress-text {
+    color: #bdc3c7; font-size: 13px; min-width: 48px; text-align: right;
+    white-space: nowrap;
+}
+.tts-panel select {
+    background: #34495e; color: #ecf0f1; border: 1px solid #46627f;
+    border-radius: 6px; padding: 4px 6px; max-width: 220px; font-size: 13px;
+}
+/* 设置行：语速/音色/连读 一行显示 */
+.tts-settings-row {
+    flex-wrap: nowrap !important;
+    gap: 8px !important;
+}
+.tts-voice-select {
+    flex: 1; min-width: 100px; max-width: 180px;
+}
+.tts-rate-select {
+    background: #34495e; color: #ecf0f1; border: 1px solid #46627f;
+    border-radius: 6px; padding: 4px 8px; font-size: 14px; cursor: pointer;
+    white-space: nowrap;
+}
+.tts-rate-select option { font-size: 14px; }
+/* 图标按钮（连读） */
+.tts-icon-btn {
+    background: #34495e; border: 1px solid #46627f; color: #bdc3c7;
+    border-radius: 6px; padding: 4px 10px; font-size: 18px; cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+}
+.tts-icon-btn:hover { background: #46627f; }
+.tts-icon-btn.active { background: #3498db; color: #fff; border-color: #3498db; }
+
+/* 章节悬浮面板 */
+.chapter-panel {
+    position: fixed; right: 20px; bottom: 20px; z-index: 1000;
+    background: #2c3e50; color: #ecf0f1;
+    border-radius: 10px; padding: 10px 14px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+    display: none;
+}
+.chapter-panel.open { display: flex; align-items: center; gap: 8px; }
+.chapter-panel-row {
+    display: flex; gap: 8px; align-items: center;
+}
+.chapter-panel-row a {
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 8px 14px;
+    background: #3498db; color: #fff; border-radius: 6px;
+    text-decoration: none; font-size: 14px; white-space: nowrap;
+    line-height: 1;
+}
+.chapter-panel-row a:hover { background: #2980b9; text-decoration: none; }
+.chapter-panel-row a.nav-home { background: #1a252f; }
+.chapter-panel-row a.nav-home:hover { background: #0d1520; }
+.chapter-panel-close {
+    flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+}
+
+/* AI 问答面板 */
+.ai-panel {
+    position: fixed; right: 20px; bottom: 20px; z-index: 1000;
+    background: #2c3e50; color: #ecf0f1;
+    border-radius: 10px; padding: 0;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+    display: none; width: 360px; max-height: 500px;
+    flex-direction: column;
+}
+.ai-panel.open { display: flex; }
+.ai-panel-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 14px; border-bottom: 1px solid #34495e;
+}
+.ai-panel-title { font-size: 15px; font-weight: 600; }
+.ai-messages {
+    flex: 1; overflow-y: auto; padding: 12px 14px;
+    display: flex; flex-direction: column; gap: 10px;
+    min-height: 200px; max-height: 350px;
+}
+.ai-message {
+    padding: 10px 12px; border-radius: 8px; font-size: 14px; line-height: 1.5;
+    word-wrap: break-word; white-space: pre-wrap;
+}
+.ai-message-user {
+    background: #3498db; color: #fff; align-self: flex-end;
+}
+.ai-message-ai {
+    background: #34495e; color: #ecf0f1; align-self: flex-start;
+}
+.ai-input-row {
+    display: flex; gap: 8px; padding: 12px 14px; border-top: 1px solid #34495e;
+}
+.ai-input {
+    flex: 1; padding: 8px 12px; border: 1px solid #46627f; border-radius: 6px;
+    background: #1a252f; color: #ecf0f1; font-size: 14px; outline: none;
+}
+.ai-input:focus { border-color: #3498db; }
+.ai-send-btn { padding: 8px 16px; background: #3498db; color: #fff; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; white-space: nowrap; }
+.ai-send-btn:hover { background: #2980b9; }
+.ai-send-btn:disabled { background: #7f8c8d; cursor: not-allowed; }
+.ai-mic-btn {
+    padding: 8px 12px; background: #2c3e50; color: #ecf0f1; border: 1px solid #46627f;
+    border-radius: 6px; font-size: 16px; cursor: pointer; white-space: nowrap;
+}
+.ai-mic-btn:hover { background: #34495e; }
+.ai-mic-btn.listening {
+    background: #e74c3c; border-color: #e74c3c;
+    animation: micPulse 1s ease-in-out infinite;
+}
+@keyframes micPulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+}
+
+/* 设置面板 */
+.settings-panel {
+    position: fixed; right: 20px; bottom: 20px; z-index: 1000;
+    background: #2c3e50; color: #ecf0f1;
+    border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.35);
+    display: none; width: 280px; flex-direction: column;
+}
+.settings-panel.open { display: flex; }
+.settings-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; }
+.settings-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.settings-row label { font-size: 14px; color: #bdc3c7; }
+
+/* 词汇讲解面板 */
+.explain-panel {
+    position: fixed; right: 20px; bottom: 20px; z-index: 1000;
+    background: #2c3e50; color: #ecf0f1;
+    border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.35);
+    display: none; width: 360px; max-height: 420px; flex-direction: column;
+}
+.explain-panel.open { display: flex; }
+.explain-body {
+    padding: 12px 14px; overflow-y: auto; font-size: 14px; line-height: 1.6;
+    white-space: pre-wrap; word-wrap: break-word;
+}
+
+/* 章节测试面板 */
+.quiz-panel {
+    position: fixed; right: 20px; bottom: 20px; z-index: 1000;
+    background: #2c3e50; color: #ecf0f1;
+    border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.35);
+    display: none; width: 360px; max-height: 480px; flex-direction: column;
+}
+.quiz-panel.open { display: flex; }
+.quiz-body {
+    padding: 12px 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
+}
+.quiz-question { font-size: 15px; font-weight: 600; line-height: 1.5; }
+.quiz-option {
+    text-align: left; padding: 10px 12px; border-radius: 8px;
+    background: #34495e; color: #ecf0f1; border: 1px solid #46627f;
+    font-size: 14px; cursor: pointer; line-height: 1.4;
+}
+.quiz-option:hover:not(:disabled) { background: #3d566e; }
+.quiz-option:disabled { cursor: default; opacity: 0.85; }
+.quiz-option.correct { background: #27ae60; border-color: #27ae60; color: #fff; }
+.quiz-option.wrong { background: #c0392b; border-color: #c0392b; color: #fff; }
+.quiz-feedback {
+    background: #1a252f; border-radius: 8px; padding: 10px 12px;
+    font-size: 13px; line-height: 1.5; color: #f39c12; white-space: pre-wrap;
+}
+.quiz-result { font-size: 20px; font-weight: 700; text-align: center; padding: 8px 0; }
+.quiz-next { align-self: center; }
+.tts-panel label { color: #bdc3c7; font-size: 13px; }
+.tts-hint { color: #f39c12; font-size: 12px; }
+.tts-sentence { border-radius: 3px; transition: background 0.2s, color 0.2s; cursor: pointer; }
+.tts-sentence.reading { background: #ffe9a8; box-shadow: 0 0 0 2px #ffe9a8; }
+.tts-sentence.read { color: #b3b3b3; }
