@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>小说阅读 - 纯客户端版</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            background-color: #f8f9fa;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            background-color: #2c3e50;
+            color: white;
+            padding: 2rem;
+            text-align: center;
+            margin-bottom: 2rem;
+            border-radius: 8px;
+        }
+
+        header h1 {
+            font-size: 2.2rem;
+            margin-bottom: 0.5rem;
+        }
+
+        header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .file-selector {
+            background: white;
+            border-radius: 8px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+
+        .file-selector h2 {
+            color: #2c3e50;
+            margin-bottom: 1rem;
+        }
+
+        .file-input-wrapper {
+            position: relative;
+            display: inline-block;
+            cursor: pointer;
+        }
+
+        .file-input-wrapper input[type="file"] {
+            position: absolute;
+            opacity: 0;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+        }
+
+        .file-btn {
+            background-color: #3498db;
+            color: white;
+            padding: 1rem 2rem;
+            border-radius: 4px;
+            font-size: 1.1rem;
+            display: inline-block;
+            transition: background-color 0.2s;
+        }
+
+        .file-btn:hover {
+            background-color: #2980b9;
+        }
+
+        .novel-info {
+            background: white;
+            border-radius: 8px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .novel-info h2 {
+            color: #2c3e50;
+            margin-bottom: 1rem;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 0.5rem;
+        }
+
+        .novel-info p {
+            margin-bottom: 1rem;
+            text-indent: 2em;
+        }
+
+        .chapter-list {
+            background: white;
+            border-radius: 8px;
+            padding: 2rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .chapter-list h2 {
+            color: #2c3e50;
+            margin-bottom: 1rem;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 0.5rem;
+        }
+
+        .chapter-item {
+            padding: 1rem;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .chapter-item:hover {
+            background-color: #f8f9fa;
+        }
+
+        .chapter-item:last-child {
+            border-bottom: none;
+        }
+
+        .chapter-title {
+            font-weight: bold;
+            font-size: 1.1rem;
+            color: #2c3e50;
+        }
+
+        .chapter-date {
+            font-size: 0.85rem;
+            color: #7f8c8d;
+        }
+
+        .chapter-content {
+            background: white;
+            border-radius: 8px;
+            padding: 2rem;
+            margin-top: 2rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            display: none;
+        }
+
+        .chapter-content.active {
+            display: block;
+        }
+
+        .chapter-content h3 {
+            color: #2c3e50;
+            margin-bottom: 1rem;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 0.5rem;
+        }
+
+        .chapter-content .content-text {
+            text-indent: 2em;
+            margin-bottom: 1rem;
+            line-height: 1.8;
+        }
+
+        .navigation {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 2rem;
+        }
+
+        .nav-btn {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: background-color 0.2s;
+        }
+
+        .nav-btn:hover {
+            background-color: #2980b9;
+        }
+
+        .nav-btn:disabled {
+            background-color: #bdc3c7;
+            cursor: not-allowed;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #7f8c8d;
+        }
+
+        .error {
+            background-color: #e74c3c;
+            color: white;
+            padding: 1rem;
+            border-radius: 4px;
+            margin: 1rem 0;
+        }
+
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: #7f8c8d;
+            margin-top: 2rem;
+        }
+
+        .back-to-list {
+            background-color: #95a5a6;
+            margin-bottom: 1rem;
+        }
+
+        .back-to-list:hover {
+            background-color: #7f8c8d;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📖 小说阅读器</h1>
+            <p>纯客户端版本 - 直接在浏览器中读取数据库</p>
+        </header>
+
+        <!-- 文件选择器 -->
+        <div id="file-selector" class="file-selector">
+            <h2>📁 加载数据库</h2>
+            <p id="file-status">正在尝试加载默认数据库...</p>
+            <br>
+            <div class="file-input-wrapper">
+                <div class="file-btn" id="manual-select-btn" style="display:none;">手动选择文件</div>
+                <input type="file" id="db-file-input" accept=".db,.sqlite" style="display:none;" />
+            </div>
+            <div id="loading" class="loading">正在加载数据库...</div>
+            <div id="error" class="error hidden"></div>
+        </div>
+
+        <!-- 小说信息 -->
+        <div id="novel-info-section" class="hidden">
+            <div class="novel-info">
+                <h2 id="novel-title">小说标题</h2>
+                <p id="novel-outline"></p>
+            </div>
+        </div>
+
+        <!-- 章节列表 -->
+        <div id="chapter-list-section" class="hidden">
+            <div class="chapter-list">
+                <h2>📚 章节目录</h2>
+                <div id="chapters-container"></div>
+            </div>
+        </div>
+
+        <!-- 章节内容 -->
+        <div id="chapter-content-section" class="hidden">
+            <div class="chapter-content active">
+                <button class="nav-btn back-to-list" onclick="showChapterList()">← 返回章节目录</button>
+                <h3 id="content-title">章节标题</h3>
+                <div id="content-text" class="content-text"></div>
+                <div class="navigation">
+                    <button class="nav-btn" id="prev-btn" onclick="prevChapter()">上一章</button>
+                    <button class="nav-btn" id="next-btn" onclick="nextChapter()">下一章</button>
+                </div>
+            </div>
+        </div>
+
+        <footer>
+            <p>小说阅读页面 | 纯客户端实现 | 基于 sql.js</p>
+        </footer>
+    </div>
+
+    <script>
+        // 全局变量
+        let db = null;
+        let novelInfo = null;
+        let chapters = [];
+        let currentChapterIndex = -1;
+
+        // 初始化 sql.js
+        let SQL = null;
+        
+        // 页面加载时初始化
+        window.addEventListener('load', async () => {
+            try {
+                const config = {
+                    locateFile: filename => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${filename}`
+                };
+                SQL = await initSqlJs(config);
+                console.log('✅ sql.js 初始化成功');
+                
+                // 初始化完成后，尝试加载默认数据库
+                await loadDefaultDatabase();
+            } catch (error) {
+                console.error('❌ sql.js 初始化失败:', error);
+                showError('加载数据库引擎失败，请刷新页面重试');
+            }
+        });
+
+        // 监听文件选择
+        document.getElementById('db-file-input').addEventListener('change', async (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            await loadDatabaseFromFile(file);
+        });
+
+        // 从文件加载数据库
+        async function loadDatabaseFromFile(file) {
+            try {
+                showLoading(true);
+                hideError();
+
+                // 读取文件为 ArrayBuffer
+                const arrayBuffer = await file.arrayBuffer();
+                const uint8Array = new Uint8Array(arrayBuffer);
+
+                // 加载数据库
+                db = new SQL.Database(uint8Array);
+                console.log('✅ 数据库加载成功');
+
+                // 读取小说信息
+                loadNovelInfo();
+
+                // 读取章节列表
+                loadChapters();
+
+                // 显示内容
+                if (novelInfo) {
+                    displayNovelInfo(novelInfo);
+                }
+
+                if (chapters.length > 0) {
+                    displayChapterList(chapters);
+                }
+
+                // 隐藏文件选择器，显示内容
+                document.getElementById('file-selector').classList.add('hidden');
+                showContent(true);
+
+            } catch (error) {
+                console.error('❌ 加载数据库失败:', error);
+                showError('加载数据库失败: ' + error.message);
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        // 尝试从默认URL加载数据库
+        async function loadDefaultDatabase() {
+            const defaultDbUrl = './bak/writer.db';
+            const statusEl = document.getElementById('file-status');
+            
+            try {
+                statusEl.textContent = '正在从默认路径加载: ./bak/writer.db';
+                
+                const response = await fetch(defaultDbUrl);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: 无法访问数据库文件`);
+                }
+
+                const arrayBuffer = await response.arrayBuffer();
+                const uint8Array = new Uint8Array(arrayBuffer);
+
+                // 加载数据库
+                db = new SQL.Database(uint8Array);
+                console.log('✅ 默认数据库加载成功');
+
+                // 读取小说信息
+                loadNovelInfo();
+
+                // 读取章节列表
+                loadChapters();
+
+                // 显示内容
+                if (novelInfo) {
+                    displayNovelInfo(novelInfo);
+                }
+
+                if (chapters.length > 0) {
+                    displayChapterList(chapters);
+                }
+
+                // 隐藏文件选择器，显示内容
+                document.getElementById('file-selector').classList.add('hidden');
+                showContent(true);
+
+            } catch (error) {
+                console.error('❌ 加载默认数据库失败:', error);
+                statusEl.textContent = '无法自动加载数据库文件，请手动选择';
+                
+                // 显示手动选择按钮
+                document.getElementById('manual-select-btn').style.display = 'inline-block';
+                document.getElementById('db-file-input').style.display = 'block';
+                document.getElementById('loading').classList.add('hidden');
+                
+                // 绑定手动选择按钮
+                document.getElementById('manual-select-btn').addEventListener('click', () => {
+                    document.getElementById('db-file-input').click();
+                });
+            }
+        }
+
+        // 加载小说信息 (no=0)
+        function loadNovelInfo() {
+            try {
+                const stmt = db.prepare(`
+                    SELECT no, type, name, outline, content, version, created_at, updated_at 
+                    FROM content 
+                    WHERE no = 0
+                `);
+                
+                if (stmt.step()) {
+                    novelInfo = stmt.getAsObject();
+                    console.log('✅ 小说信息加载成功:', novelInfo.name);
+                } else {
+                    novelInfo = null;
+                    console.log('ℹ️ 未找到小说信息');
+                }
+            } catch (error) {
+                console.error('❌ 加载小说信息失败:', error);
+                novelInfo = null;
+            }
+        }
+
+        // 加载章节列表 (no>0)
+        function loadChapters() {
+            try {
+                const stmt = db.prepare(`
+                    SELECT no, name, outline, content, created_at, updated_at 
+                    FROM content 
+                    WHERE no > 0
+                    ORDER BY no ASC
+                `);
+
+                chapters = [];
+                while (stmt.step()) {
+                    chapters.push(stmt.getAsObject());
+                }
+
+                console.log(`✅ 加载了 ${chapters.length} 个章节`);
+            } catch (error) {
+                console.error('❌ 加载章节失败:', error);
+                chapters = [];
+            }
+        }
+
+        // 显示/隐藏加载状态
+        function showLoading(show) {
+            const loading = document.getElementById('loading');
+            if (show) {
+                loading.classList.remove('hidden');
+            } else {
+                loading.classList.add('hidden');
+            }
+        }
+
+        // 显示错误信息
+        function showError(message) {
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = message;
+            errorDiv.classList.remove('hidden');
+        }
+
+        // 隐藏错误信息
+        function hideError() {
+            document.getElementById('error').classList.add('hidden');
+        }
+
+        // 显示内容区域
+        function showContent(show) {
+            const sections = ['novel-info-section', 'chapter-list-section'];
+            sections.forEach(id => {
+                const element = document.getElementById(id);
+                if (show) {
+                    element.classList.remove('hidden');
+                } else {
+                    element.classList.add('hidden');
+                }
+            });
+        }
+
+        // 显示小说信息
+        function displayNovelInfo(info) {
+            document.getElementById('novel-title').textContent = info.name || '未命名小说';
+            document.getElementById('novel-outline').textContent = info.outline || '暂无简介';
+            document.getElementById('novel-info-section').classList.remove('hidden');
+        }
+
+        // 显示章节列表
+        function displayChapterList(chaptersList) {
+            const container = document.getElementById('chapters-container');
+            container.innerHTML = '';
+
+            chaptersList.forEach((chapter, index) => {
+                const chapterDiv = document.createElement('div');
+                chapterDiv.className = 'chapter-item';
+                chapterDiv.onclick = () => showChapterContent(index);
+
+                chapterDiv.innerHTML = `
+                    <div class="chapter-title">第${chapter.no}章 ${chapter.name || '无标题'}</div>
+                    <div class="chapter-date">更新时间: ${formatDate(chapter.updated_at)}</div>
+                `;
+
+                container.appendChild(chapterDiv);
+            });
+
+            document.getElementById('chapter-list-section').classList.remove('hidden');
+        }
+
+        // 显示章节内容
+        function showChapterContent(index) {
+            if (index < 0 || index >= chapters.length) return;
+
+            currentChapterIndex = index;
+            const chapter = chapters[index];
+
+            document.getElementById('content-title').textContent = `第${chapter.no}章 ${chapter.name || '无标题'}`;
+            document.getElementById('content-text').innerHTML = formatContent(chapter.content || '暂无内容');
+
+            // 控制导航按钮
+            document.getElementById('prev-btn').disabled = index === 0;
+            document.getElementById('next-btn').disabled = index === chapters.length - 1;
+
+            // 隐藏列表，显示内容
+            document.getElementById('chapter-list-section').classList.add('hidden');
+            document.getElementById('chapter-content-section').classList.remove('hidden');
+
+            // 滚动到顶部
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        // 显示章节列表
+        function showChapterList() {
+            document.getElementById('chapter-content-section').classList.add('hidden');
+            document.getElementById('chapter-list-section').classList.remove('hidden');
+            currentChapterIndex = -1;
+        }
+
+        // 上一章
+        function prevChapter() {
+            if (currentChapterIndex > 0) {
+                showChapterContent(currentChapterIndex - 1);
+            }
+        }
+
+        // 下一章
+        function nextChapter() {
+            if (currentChapterIndex < chapters.length - 1) {
+                showChapterContent(currentChapterIndex + 1);
+            }
+        }
+
+        // 格式化日期
+        function formatDate(dateString) {
+            if (!dateString) return '未知';
+            const date = new Date(dateString);
+            return date.toLocaleString('zh-CN');
+        }
+
+        // 格式化内容（简单的段落处理）
+        function formatContent(content) {
+            if (!content) return '暂无内容';
+            // 将换行转换为段落
+            return content.split('\n\n').map(p => `<p>${p.trim()}</p>`).join('');
+        }
+    </script>
+</body>
+</html>

@@ -5,256 +5,302 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>小说管理</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: #0f1419; color: #e7e9ea; min-height: 100vh;
-    padding-bottom: 80px;
-  }
-  /* 顶部栏 */
-  .header {
-    background: #1a252f; padding: 16px; position: sticky; top: 0; z-index: 100;
-    border-bottom: 1px solid #2c3e50;
-  }
-  .header h1 { font-size: 18px; font-weight: 600; }
-  .header .subtitle { font-size: 12px; color: #7f8c8d; margin-top: 4px; }
-
-  /* 命令输入区 */
-  .cmd-bar {
-    position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
-    background: #1a252f; border-top: 1px solid #2c3e50;
-    padding: 12px; display: flex; gap: 8px;
-  }
-  .cmd-input {
-    flex: 1; padding: 12px 16px; border-radius: 24px;
-    border: 1px solid #2c3e50; background: #0f1419;
-    color: #e7e9ea; font-size: 15px; outline: none;
-  }
-  .cmd-input:focus { border-color: #3498db; }
-  .cmd-input::placeholder { color: #7f8c8d; }
-  .cmd-send {
-    width: 44px; height: 44px; border-radius: 50%;
-    background: #3498db; border: none; color: #fff;
-    font-size: 20px; cursor: pointer; display: flex;
-    align-items: center; justify-content: center;
-  }
-  .cmd-send:active { background: #2980b9; }
-
-  /* 快捷按钮区 */
-  .quick-actions {
-    display: flex; gap: 8px; padding: 12px 16px;
-    overflow-x: auto; -webkit-overflow-scrolling: touch;
-  }
-  .quick-btn {
-    flex-shrink: 0; padding: 8px 16px; border-radius: 20px;
-    background: #2c3e50; border: 1px solid #34495e;
-    color: #ecf0f1; font-size: 13px; cursor: pointer;
-    white-space: nowrap;
-  }
-  .quick-btn:active { background: #34495e; }
-  .quick-btn.primary { background: #3498db; border-color: #3498db; }
-
-  /* 内容区 */
-  .content { padding: 16px; }
-  .section-title {
-    font-size: 14px; color: #7f8c8d; margin-bottom: 12px;
-    text-transform: uppercase; letter-spacing: 1px;
-  }
-
-  /* 小说卡片 */
-  .novel-card {
-    background: #1a252f; border-radius: 12px; padding: 16px;
-    margin-bottom: 12px; border: 1px solid #2c3e50;
-  }
-  .novel-card .title { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
-  .novel-card .meta { font-size: 12px; color: #7f8c8d; margin-bottom: 10px; }
-  .novel-card .actions { display: flex; gap: 8px; flex-wrap: wrap; }
-  .novel-card .actions button {
-    padding: 6px 12px; border-radius: 6px; border: none;
-    font-size: 12px; cursor: pointer;
-  }
-  .btn-view { background: #3498db; color: #fff; }
-  .btn-add { background: #27ae60; color: #fff; }
-  .btn-del { background: #c0392b; color: #fff; }
-  .btn-edit { background: #f39c12; color: #fff; }
-
-  /* 章节列表 */
-  .chapter-item {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 12px 16px; background: #1a252f; border-radius: 8px;
-    margin-bottom: 8px; border: 1px solid #2c3e50;
-  }
-  .chapter-item .ch-title { font-size: 14px; flex: 1; }
-  .chapter-item .ch-num { font-size: 12px; color: #7f8c8d; margin-right: 12px; }
-  .chapter-item .ch-del {
-    width: 32px; height: 32px; border-radius: 50%;
-    background: #c0392b; border: none; color: #fff;
-    font-size: 16px; cursor: pointer;
-  }
-
-  /* 响应结果 */
-  .response {
-    background: #1a252f; border-radius: 12px; padding: 16px;
-    margin-bottom: 16px; border-left: 3px solid #3498db;
-    font-size: 14px; line-height: 1.6; white-space: pre-wrap;
-  }
-  .response.error { border-left-color: #c0392b; color: #e74c3c; }
-  .response.success { border-left-color: #27ae60; }
-
-  /* 空状态 */
-  .empty { text-align: center; padding: 40px 20px; color: #7f8c8d; }
-  .empty .icon { font-size: 48px; margin-bottom: 12px; }
-
-  /* 加载 */
-  .loading { text-align: center; padding: 20px; color: #7f8c8d; }
-  .spinner {
-    display: inline-block; width: 24px; height: 24px;
-    border: 3px solid #2c3e50; border-top-color: #3498db;
-    border-radius: 50%; animation: spin 0.8s linear infinite;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
-
-  /* 模态框 */
-  .modal-overlay {
-    display: none; position: fixed; inset: 0; z-index: 200;
-    background: rgba(0,0,0,0.7); align-items: center; justify-content: center;
-    padding: 20px;
-  }
-  .modal-overlay.show { display: flex; }
-  .modal {
-    background: #1a252f; border-radius: 16px; padding: 24px;
-    width: 100%; max-width: 400px; max-height: 80vh; overflow-y: auto;
-  }
-  .modal h2 { font-size: 18px; margin-bottom: 16px; }
-  .modal textarea {
-    width: 100%; padding: 12px; border-radius: 8px;
-    border: 1px solid #2c3e50; background: #0f1419;
-    color: #e7e9ea; font-size: 14px; resize: vertical;
-    min-height: 120px; outline: none;
-  }
-  .modal textarea:focus { border-color: #3498db; }
-  .modal-actions { display: flex; gap: 12px; margin-top: 16px; justify-content: flex-end; }
-  .modal-actions button {
-    padding: 10px 20px; border-radius: 8px; border: none;
-    font-size: 14px; cursor: pointer;
-  }
-  .modal-cancel { background: #2c3e50; color: #ecf0f1; }
-  .modal-confirm { background: #3498db; color: #fff; }
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:#0f1419; color:#e7e9ea; min-height:100vh; padding-bottom:76px; }
+  .header { background:#1a252f; padding:14px 16px; position:sticky; top:0; z-index:100; border-bottom:1px solid #2c3e50; }
+  .header h1 { font-size:17px; font-weight:600; }
+  .novel-select { width:100%; margin-top:10px; padding:11px 12px; border-radius:10px; background:#0f1419; color:#e7e9ea; border:1px solid #2c3e50; font-size:15px; }
+  .section { padding:14px 16px; }
+  .grp-title { font-size:12px; color:#7f8c8d; letter-spacing:1px; margin:8px 0 10px; text-transform:uppercase; }
+  .btns { display:flex; flex-wrap:wrap; gap:10px; }
+  .mbtn { flex:1 1 calc(50% - 5px); min-width:120px; padding:14px 10px; border-radius:12px; background:#1a252f; border:1px solid #2c3e50; color:#ecf0f1; font-size:14px; cursor:pointer; }
+  .mbtn:active { background:#2c3e50; }
+  .mbtn.wide { flex:1 1 100%; }
+  .result { background:#1a252f; border-radius:12px; padding:14px; border-left:3px solid #3498db; font-size:14px; line-height:1.6; white-space:pre-wrap; word-break:break-word; max-height:46vh; overflow:auto; }
+  .result.err { border-left-color:#c0392b; color:#e74c3c; }
+  .result.ok { border-left-color:#27ae60; }
+  .ch-list { display:flex; flex-direction:column; gap:8px; }
+  .ch-row { display:flex; align-items:center; justify-content:space-between; background:#1a252f; border:1px solid #2c3e50; border-radius:10px; padding:10px 12px; font-size:14px; }
+  .ch-row .tag { font-size:11px; color:#7f8c8d; }
+  .ch-row button { padding:6px 10px; border:none; border-radius:8px; font-size:12px; cursor:pointer; }
+  .ch-view { background:#3498db; color:#fff; }
+  /* AI 输入栏 */
+  .cmd-bar { position:fixed; bottom:0; left:0; right:0; background:#1a252f; border-top:1px solid #2c3e50; padding:10px 12px; display:flex; gap:8px; z-index:100; }
+  .cmd-input { flex:1; padding:12px 14px; border-radius:22px; border:1px solid #2c3e50; background:#0f1419; color:#e7e9ea; font-size:15px; outline:none; }
+  .cmd-input:focus { border-color:#3498db; }
+  .cmd-send { width:44px; height:44px; border-radius:50%; background:#3498db; border:none; color:#fff; font-size:20px; cursor:pointer; }
+  /* 模态 */
+  .mask { display:none; position:fixed; inset:0; background:rgba(0,0,0,.72); z-index:200; align-items:flex-end; justify-content:center; }
+  .mask.show { display:flex; }
+  .sheet { background:#1a252f; width:100%; max-width:560px; border-radius:16px 16px 0 0; padding:20px; max-height:88vh; overflow:auto; }
+  .sheet h2 { font-size:16px; margin-bottom:6px; }
+  .sheet .desc { font-size:12px; color:#7f8c8d; margin-bottom:14px; }
+  .field { margin-bottom:12px; }
+  .field label { display:block; font-size:12px; color:#95a5a6; margin-bottom:5px; }
+  .field input, .field textarea, .field select { width:100%; padding:10px 12px; border-radius:8px; border:1px solid #2c3e50; background:#0f1419; color:#e7e9ea; font-size:14px; outline:none; }
+  .field textarea { min-height:96px; resize:vertical; }
+  .row2 { display:flex; gap:10px; }
+  .row2 .field { flex:1; }
+  .actions { display:flex; gap:10px; margin-top:8px; }
+  .actions button { flex:1; padding:13px; border:none; border-radius:10px; font-size:15px; cursor:pointer; }
+  .b-cancel { background:#2c3e50; color:#ecf0f1; }
+  .b-run { background:#3498db; color:#fff; }
+  .b-ok { background:#27ae60; color:#fff; }
+  .loading { text-align:center; color:#7f8c8d; padding:24px; }
+  .kv { font-size:12px; color:#95a5a6; word-break:break-all; }
 </style>
 </head>
 <body>
-
 <div class="header">
   <h1>📚 小说管理</h1>
-  <div class="subtitle">命令输入 · 按钮操作 · 移动端优先</div>
+  <select class="novel-select" id="novelSel"><option value="">加载中…</option></select>
 </div>
 
-<!-- 快捷按钮 -->
-<div class="quick-actions">
-  <button class="quick-btn primary" onclick="execCmd('列举所有小说')">📋 列举小说</button>
-  <button class="quick-btn" onclick="execCmd('查看大纲')">📖 查看大纲</button>
-  <button class="quick-btn" onclick="showAddChapter()">➕ 追加章节</button>
-  <button class="quick-btn" onclick="execCmd('检查一致性')">🔍 检查一致性</button>
-  <button class="quick-btn" onclick="execCmd('查看角色')">👥 查看角色</button>
+<div class="section">
+  <div class="grp-title">操作</div>
+  <div class="btns" id="menuBtns"><div class="loading">加载菜单…</div></div>
 </div>
 
-<!-- 内容区 -->
-<div class="content" id="content">
-  <div class="empty">
-    <div class="icon">📚</div>
-    <div>输入命令或点击按钮开始管理</div>
-    <div style="font-size:12px;margin-top:8px;color:#555">试试："列举所有小说"</div>
-  </div>
+<div class="section">
+  <div id="resultArea"></div>
 </div>
 
-<!-- 命令输入栏 -->
 <div class="cmd-bar">
-  <input type="text" class="cmd-input" id="cmdInput" placeholder="输入命令..." autocomplete="off">
-  <button class="cmd-send" onclick="sendCmd()">➤</button>
+  <input type="text" class="cmd-input" id="cmdInput" placeholder="用一句话操作，如：删除第三章 / 列举小说" autocomplete="off">
+  <button class="cmd-send" id="cmdSend">➤</button>
 </div>
 
-<!-- 追加章节模态框 -->
-<div class="modal-overlay" id="addChapterModal">
-  <div class="modal">
-    <h2>➕ 追加章节</h2>
-    <input type="text" class="cmd-input" id="newChTitle" placeholder="章节标题" style="margin-bottom:12px;width:100%">
-    <textarea id="newChContent" placeholder="章节内容..."></textarea>
-    <div class="modal-actions">
-      <button class="modal-cancel" onclick="closeModal()">取消</button>
-      <button class="modal-confirm" onclick="confirmAddChapter()">确认</button>
-    </div>
-  </div>
-</div>
+<!-- 参数/确认 底部弹层 -->
+<div class="mask" id="mask"><div class="sheet" id="sheet"></div></div>
 
 <script>
-const API_BASE = '/api/novel'; // 后端 API 基础路径（需根据实际调整）
-
-// 命令解析与执行
-function execCmd(cmd) {
-  const content = document.getElementById('content');
-  content.innerHTML = '<div class="loading"><div class="spinner"></div><div style="margin-top:12px">处理中...</div></div>';
-
-  // 模拟 API 调用（实际需对接后端）
-  setTimeout(() => {
-    let response = '';
-    let isError = false;
-
-    if (cmd.includes('列举')) {
-      response = '📋 小说列表：\n\n1. 《以笔行侠》- 15 章\n2. 《魔法数学王国》- 8 章\n3. 《星际探险记》- 12 章';
-    } else if (cmd.includes('大纲')) {
-      response = '📖 当前小说大纲：\n\n第一卷：初入江湖\n- 第1章：意外穿越\n- 第2章：结识伙伴\n...\n\n第二卷：成长历练\n- 第6章：首次战斗\n...';
-    } else if (cmd.includes('角色')) {
-      response = '👥 角色列表：\n\n• 张三（主角）- 15岁少年\n• 李四（师傅）- 神秘老者\n• 王五（反派）- 黑暗势力首领';
-    } else if (cmd.includes('检查')) {
-      response = ' 一致性检查：\n\n✅ 章节连续性：通过\n✅ 角色一致性：通过\n️ 时间线：第3章与第5章存在冲突';
-      isError = false;
-    } else {
-      response = ' 无法识别的命令：' + cmd + '\n\n支持的命令：\n• 列举所有小说\n• 查看大纲\n• 查看角色\n• 检查一致性\n• 追加章节\n• 删除章节';
-      isError = true;
-    }
-
-    content.innerHTML = `<div class="response ${isError ? 'error' : 'success'}">${response}</div>`;
-  }, 500);
-}
-
-function sendCmd() {
-  const input = document.getElementById('cmdInput');
-  const cmd = input.value.trim();
-  if (!cmd) return;
-  input.value = '';
-  execCmd(cmd);
-}
-
-// 回车发送
-document.getElementById('cmdInput').addEventListener('keypress', function(e) {
-  if (e.key === 'Enter') sendCmd();
+const $ = (s) => document.querySelector(s);
+const api = (p, opt) => fetch('/api' + p, opt).then(async r => {
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+  return j;
 });
+let MENU = [];
+let currentNovel = '';
 
-// 追加章节
-function showAddChapter() {
-  document.getElementById('addChapterModal').classList.add('show');
+function novelFile() { return $('#novelSel').value || ''; }
+function setNovel(v) { currentNovel = v; $('#novelSel').value = v; }
+
+async function boot() {
+  try {
+    const [{ groups }, nv] = await Promise.all([ api('/menu'), api('/novels') ]);
+    MENU = groups || [];
+    renderMenu();
+    renderNovels(nv.novels || []);
+  } catch (e) { showResult('初始化失败：' + e.message, 'err'); }
 }
-function closeModal() {
-  document.getElementById('addChapterModal').classList.remove('show');
+
+function renderNovels(novels) {
+  const sel = $('#novelSel');
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">— 选择小说 —</option>' +
+    novels.map(n => `<option value="${n.file}">${n.name || n.file}（${n.chapterCount||0}章）</option>`).join('');
+  if (prev) sel.value = prev;
+  sel.onchange = () => { currentNovel = sel.value; };
 }
-function confirmAddChapter() {
-  const title = document.getElementById('newChTitle').value.trim();
-  const content = document.getElementById('newChContent').value.trim();
-  if (!title || !content) {
-    alert('请填写标题和内容');
-    return;
+
+function renderMenu() {
+  const box = $('#menuBtns');
+  let html = '';
+  MENU.forEach(g => {
+    html += `<div style="flex-basis:100%;margin-top:6px" class="grp-title">${g.group}</div>`;
+    g.items.forEach(it => {
+      const wide = (it.label.length > 7) ? ' wide' : '';
+      html += `<button class="mbtn${wide}" data-key="${it.key}" data-label="${it.label}" data-desc="${it.desc||''}" data-needs="${it.needsNovel?'1':'0'}">${it.label}</button>`;
+    });
+  });
+  box.innerHTML = html;
+  box.querySelectorAll('.mbtn').forEach(b => b.onclick = () => onAction(b));
+}
+
+function findItem(key) {
+  for (const g of MENU) for (const it of g.items) if (it.key === key) return it;
+  return null;
+}
+
+// 动作 → 需要的表单字段
+function fieldsFor(key) {
+  switch (key) {
+    case 'saveNovelPlan': return [
+      { n:'info.name', l:'小说名称', t:'text', req:1 },
+      { n:'info.outline', l:'故事简介', t:'area' },
+      { n:'info.content', l:'角色/世界观设定', t:'area' }];
+    case 'generateChapterOutlines': return [{ n:'totalChapters', l:'章节总数', t:'number', def:10 }];
+    case 'addChapterOutline': return [
+      { n:'info.no', l:'插入位置(章号)', t:'number' }, { n:'info.name', l:'章节标题', t:'text' }, { n:'info.outline', l:'章节大纲', t:'area' }];
+    case 'updateChapterOutline': return [
+      { n:'info.no', l:'章号', t:'number', req:1 }, { n:'info.name', l:'章节标题', t:'text' }, { n:'info.outline', l:'章节大纲', t:'area' }];
+    case 'generate': return [
+      { n:'chapter', l:'章号(0=批量补缺)', t:'number', def:0 },
+      { n:'force', l:'覆盖已有正文', t:'bool' }];
+    case 'add': return [
+      { n:'chapter', l:'章号(留空=末尾追加)', t:'number' },
+      { n:'info.name', l:'章节标题', t:'text' }, { n:'info.content', l:'章节正文', t:'area', req:1 }];
+    case 'modify': return [
+      { n:'chapter', l:'章号', t:'number', req:1 }, { n:'modifyInstructions', l:'修改要求', t:'area', req:1 }];
+    case 'delete': return [{ n:'chapter', l:'章号', t:'number', req:1 }];
+    case 'savePreface': return [{ n:'preface', l:'设定说明(Markdown)', t:'area', req:1 }];
+    case 'setParts': return [{ n:'parts', l:'分部 JSON', t:'json', def:'[{"name":"第一部","from":1,"to":5}]' }];
+    case 'generatePartIntros': return [{ n:'partNo', l:'部序号(留空=全部)', t:'number' }];
+    case 'updateNovelPlan': return [
+      { n:'modificationType', l:'修改类型', t:'select', opts:['updateNovelInfo','updateChapterOutline','addChapterOutline','deleteChapter','reNumberChapters'] },
+      { n:'info', l:'info JSON', t:'json', def:'{}' }];
+    default: return [];
   }
-  closeModal();
-  execCmd('追加章节：' + title);
-  document.getElementById('newChTitle').value = '';
-  document.getElementById('newChContent').value = '';
 }
 
-// 点击遮罩关闭
-document.getElementById('addChapterModal').addEventListener('click', function(e) {
-  if (e.target === this) closeModal();
-});
-</script>
+function onAction(btn) {
+  const key = btn.dataset.key, label = btn.dataset.label, desc = btn.dataset.desc, needs = btn.dataset.needs === '1';
+  if (needs && !novelFile()) { showResult('请先在顶部选择一部小说', 'err'); return; }
+  if (key === 'publish') { doPublish(); return; }
+  const fields = fieldsFor(key);
+  if (fields.length === 0) { runSimple(key, label); return; }
+  openParamSheet(key, label, desc, fields);
+}
 
+// 无需参数的动作
+async function runSimple(key, label) {
+  showLoading(`执行：${label}`);
+  try {
+    const body = { action: key };
+    if (novelFile()) body.dbPath = novelFile();
+    const r = await api('/run', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    showResult(r.result || '✅ 完成', 'ok');
+    if (key === 'listNovels') renderNovels((r.result && r.result.novels) || await api('/novels').then(x=>x.novels));
+    refreshIfChapters(key);
+  } catch (e) { showResult('❌ ' + e.message, 'err'); }
+}
+
+function refreshIfChapters(key) {
+  if (['generate','add','delete','modify','reNumberChapters','generateChapterOutlines','addChapterOutline','updateChapterOutline'].includes(key)) {
+    // 章节结构可能变化，若有选中库则刷新提示
+  }
+}
+
+async function doPublish() {
+  const dbPath = novelFile();
+  if (!dbPath) return showResult('请先选择小说', 'err');
+  showLoading('发布中，生成静态页…');
+  try {
+    const r = await api(`/novels/${encodeURIComponent(dbPath)}/publish`, { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
+    showResult(`✅ 已发布 ${r.chapterCount} 章\n📖 阅读地址：${r.indexUrl}\n（手机同网段访问 http://<本机IP>:3400${r.indexUrl}）`, 'ok');
+  } catch (e) { showResult('❌ 发布失败：' + e.message, 'err'); }
+}
+
+// 参数弹层
+function openParamSheet(key, label, desc, fields) {
+  const s = $('#sheet');
+  let html = `<h2>${label}</h2>${desc?`<div class="desc">${desc}</div>`:''}`;
+  fields.forEach((f, i) => {
+    const id = 'f_' + i;
+    if (f.t === 'area') html += `<div class="field"><label>${f.l}${f.req?' *':''}</label><textarea id="${id}" data-n="${f.n}"></textarea></div>`;
+    else if (f.t === 'json') html += `<div class="field"><label>${f.l}（JSON）</label><textarea id="${id}" data-n="${f.n}" data-json="1">${f.def||'{}'}</textarea></div>`;
+    else if (f.t === 'number') html += `<div class="field"><label>${f.l}</label><input id="${id}" data-n="${f.n}" type="number" value="${f.def??''}"></div>`;
+    else if (f.t === 'bool') html += `<div class="field"><label>${f.l}</label><select id="${id}" data-n="${f.n}"><option value="0">否</option><option value="1">是</option></select></div>`;
+    else if (f.t === 'select') html += `<div class="field"><label>${f.l}</label><select id="${id}" data-n="${f.n}">${f.opts.map(o=>`<option>${o}</option>`).join('')}</select></div>`;
+    else html += `<div class="field"><label>${f.l}${f.req?' *':''}</label><input id="${id}" data-n="${f.n}" type="text"></div>`;
+  });
+  html += `<div class="actions"><button class="b-cancel" id="scancel">取消</button><button class="b-run" id="srun">执行</button></div>`;
+  s.innerHTML = html;
+  $('#mask').classList.add('show');
+  $('#scancel').onclick = closeModal;
+  $('#srun').onclick = () => submitParam(key, fields);
+}
+
+function collect(fields) {
+  const body = {};
+  for (let i = 0; i < fields.length; i++) {
+    const f = fields[i];
+    const el = document.getElementById('f_' + i);
+    let v = el.value;
+    if (f.t === 'bool') v = (v === '1');
+    else if (f.t === 'number') v = (v === '' ? undefined : Number(v));
+    else if (f.t === 'json') { try { v = JSON.parse(v || '{}'); } catch { throw new Error(f.l + ' 不是合法 JSON'); } }
+    if (v === undefined || v === '') { if (f.req) throw new Error(f.l + ' 必填'); else continue; }
+    // 嵌套 info.xxx
+    const parts = f.n.split('.');
+    let cur = body;
+    for (let k = 0; k < parts.length - 1; k++) { cur[parts[k]] = cur[parts[k]] || {}; cur = cur[parts[k]]; }
+    cur[parts[parts.length - 1]] = v;
+  }
+  return body;
+}
+
+async function submitParam(key, fields) {
+  let extra;
+  try { extra = collect(fields); } catch (e) { showResult('❌ ' + e.message, 'err'); closeModal(); return; }
+  closeModal();
+  showLoading('执行中…（生成/检查类可能需数十秒）');
+  try {
+    const body = { action: key, dbPath: novelFile(), ...extra };
+    const r = await api('/run', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    showResult(r.result || '✅ 完成', 'ok');
+    reloadNovels();
+  } catch (e) { showResult('❌ ' + e.message, 'err'); }
+}
+
+async function reloadNovels() {
+  try { const nv = await api('/novels'); renderNovels(nv.novels || []); setNovel(novelFile()); } catch {}
+}
+
+// ── 单轮 AI 窗口 ──
+$('#cmdSend').onclick = aiPlan;
+$('#cmdInput').addEventListener('keydown', e => { if (e.key === 'Enter') aiPlan(); });
+
+async function aiPlan() {
+  const userInput = $('#cmdInput').value.trim();
+  if (!userInput) return;
+  $('#cmdInput').value = '';
+  showLoading('AI 解析中…');
+  try {
+    const p = await api('/ai/plan', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ userInput, novelFile: novelFile() }) });
+    if (!p.tool) { showResult('🤔 ' + (p.reason || '无法识别指令'), 'err'); return; }
+    openConfirmCard(p);
+  } catch (e) { showResult('❌ ' + e.message, 'err'); }
+}
+
+function openConfirmCard(p) {
+  const s = $('#sheet');
+  const argsStr = JSON.stringify(p.args, null, 2);
+  s.innerHTML = `
+    <h2>🤖 AI 拟执行</h2>
+    <div class="desc">工具：<b>${p.tool}</b>${p.reason?`　${p.reason}`:''}</div>
+    <div class="field"><label>参数（可修改）</label><textarea id="aiargs" style="min-height:150px">${argsStr}</textarea></div>
+    <div class="actions"><button class="b-cancel" id="aicancel">取消</button><button class="b-ok" id="aiconfirm">确认执行</button></div>`;
+  $('#mask').classList.add('show');
+  $('#aicancel').onclick = closeModal;
+  $('#aiconfirm').onclick = () => aiExecute(p.tool, $('#aiargs').value);
+}
+
+async function aiExecute(tool, argsRaw) {
+  let args;
+  try { args = JSON.parse(argsRaw || '{}'); } catch { showResult('❌ 参数不是合法 JSON', 'err'); return; }
+  if (!args.dbPath && novelFile()) args.dbPath = novelFile();
+  closeModal();
+  showLoading(`执行 ${tool} 中…`);
+  try {
+    const r = await api('/ai/execute', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ tool, args }) });
+    showResult(typeof r.result === 'string' ? r.result : JSON.stringify(r.result, null, 2), 'ok');
+    reloadNovels();
+  } catch (e) { showResult('❌ ' + e.message, 'err'); }
+}
+
+// 查看章节（点击小说时）
+$('#novelSel').addEventListener('change', () => { currentNovel = $('#novelSel').value; });
+
+function closeModal() { $('#mask').classList.remove('show'); }
+$('#mask').addEventListener('click', e => { if (e.target === $('#mask')) closeModal(); });
+
+function showLoading(t) { $('#resultArea').innerHTML = `<div class="result"><div class="loading">${t}</div></div>`; }
+function showResult(t, cls) { $('#resultArea').innerHTML = `<div class="grp-title">结果</div><div class="result ${cls||''}">${escapeHtml(t)}</div>`; }
+function escapeHtml(s){ return String(s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+boot();
+</script>
 </body>
 </html>

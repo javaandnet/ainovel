@@ -1,7 +1,7 @@
 {
   "name": "ainovel",
   "version": "1.0.0",
-  "description": "AI 小说平台 - 阅读 + 管理 + 学习",
+  "description": "AI 小说平台 - 阅读 + 管理 + 学习（从 galaclaw writer agent 独立移植）",
   "type": "module",
   "main": "server.js",
   "scripts": {
@@ -12,7 +12,9 @@
   "license": "MIT",
   "dependencies": {
     "express": "^4.21.0",
+    "cors": "^2.8.5",
     "better-sqlite3": "^11.0.0",
-    "cors": "^2.8.5"
+    "fs-extra": "^11.2.0",
+    "marked": "^12.0.0"
   }
 }
