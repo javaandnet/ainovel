@@ -14,7 +14,6 @@
 // 供菜单渲染的高层操作（家长移动端视角，隐藏底层别名）
 export const MENU_ACTIONS = [
   { group: '小说', items: [
-    { key: 'listNovels', label: '📚 列举小说', needsNovel: false, desc: '列出 data/ 下所有小说库' },
     { key: 'saveNovelPlan', label: '➕ 新建小说', needsNovel: true, desc: '保存小说规划（书名/简介/设定），无章节大纲时自动生成', argsHint: { info: '{ name, outline, content }' } },
     { key: 'getNovelInfo', label: 'ℹ️ 小说信息', needsNovel: true, desc: '查看小说概要、部结构、章节数' },
   ]},
@@ -45,7 +44,6 @@ export const MENU_ACTIONS = [
 // AI 窗口的可调用工具（function schema，供 LLM 单轮选择）
 // 只暴露安全、常用的一层；执行前一律经用户确认。
 export const AI_TOOLS = [
-  { name: 'listNovels', description: '列出所有小说库。无需参数。', parameters: {} },
   { name: 'getNovelInfo', description: '查看某小说的信息与章节数。', parameters: { dbPath: 'string 小说库文件名(如 以笔行侠.db)' } },
   { name: 'deleteChapter', description: '删除指定章节（会自动重排编号）。', parameters: { dbPath: 'string', chapter: 'integer 章号' } },
   { name: 'addChapter', description: '追加一章正文。', parameters: { dbPath: 'string', name: 'string 章节标题', content: 'string 章节正文' } },

@@ -6,30 +6,49 @@
 <title>小说管理</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:#0f1419; color:#e7e9ea; min-height:100vh; padding-bottom:76px; }
-  .header { background:#1a252f; padding:14px 16px; position:sticky; top:0; z-index:100; border-bottom:1px solid #2c3e50; }
+  :root { --cmd-h:66px; --dock-max:34vh; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:#0f1419; color:#e7e9ea; min-height:100vh; padding-bottom:calc(var(--cmd-h) + var(--dock-max) + 16px); }
+  .header { background:#1a252f; padding:14px 16px 0; position:sticky; top:0; z-index:100; border-bottom:1px solid #2c3e50; }
+  .topbar { display:flex; align-items:center; justify-content:space-between; }
   .header h1 { font-size:17px; font-weight:600; }
-  .novel-select { width:100%; margin-top:10px; padding:11px 12px; border-radius:10px; background:#0f1419; color:#e7e9ea; border:1px solid #2c3e50; font-size:15px; }
+  .who { font-size:12px; color:#95a5a6; display:flex; align-items:center; gap:8px; }
+  .who button { padding:5px 10px; font-size:12px; border-radius:8px; background:#2c3e50; color:#ecf0f1; border:none; cursor:pointer; }
+  .novel-row { display:flex; gap:8px; margin-top:10px; }
+  .novel-select { flex:1; min-width:0; padding:11px 12px; border-radius:10px; background:#0f1419; color:#e7e9ea; border:1px solid #2c3e50; font-size:15px; }
+  .newbtn { padding:0 14px; border-radius:10px; background:#2472a4; color:#fff; border:none; font-size:14px; cursor:pointer; white-space:nowrap; }
+  .tabs { display:flex; gap:8px; margin-top:12px; }
+  .tab { flex:1; padding:11px; border:none; background:transparent; color:#7f8c8d; font-size:14px; border-bottom:2px solid transparent; cursor:pointer; }
+  .tab.active { color:#ecf0f1; border-bottom-color:#3498db; font-weight:600; }
   .section { padding:14px 16px; }
-  .grp-title { font-size:12px; color:#7f8c8d; letter-spacing:1px; margin:8px 0 10px; text-transform:uppercase; }
+  .grp-title { font-size:12px; color:#7f8c8d; letter-spacing:1px; margin:8px 0 10px; }
   .btns { display:flex; flex-wrap:wrap; gap:10px; }
-  .mbtn { flex:1 1 calc(50% - 5px); min-width:120px; padding:14px 10px; border-radius:12px; background:#1a252f; border:1px solid #2c3e50; color:#ecf0f1; font-size:14px; cursor:pointer; }
+  .mbtn { flex:1 1 calc(50% - 5px); min-width:120px; padding:13px 10px; border-radius:12px; background:#1a252f; border:1px solid #2c3e50; color:#ecf0f1; font-size:14px; cursor:pointer; }
   .mbtn:active { background:#2c3e50; }
   .mbtn.wide { flex:1 1 100%; }
-  .result { background:#1a252f; border-radius:12px; padding:14px; border-left:3px solid #3498db; font-size:14px; line-height:1.6; white-space:pre-wrap; word-break:break-word; max-height:46vh; overflow:auto; }
+  .mbtn.primary { background:#2472a4; border-color:#2472a4; }
+  .mbtn.danger { background:#7c2d2d; border-color:#7c2d2d; }
+  .result { background:#1a252f; border-radius:12px; padding:14px; border-left:3px solid #3498db; font-size:14px; line-height:1.6; white-space:pre-wrap; word-break:break-word; }
   .result.err { border-left-color:#c0392b; color:#e74c3c; }
   .result.ok { border-left-color:#27ae60; }
   .ch-list { display:flex; flex-direction:column; gap:8px; }
-  .ch-row { display:flex; align-items:center; justify-content:space-between; background:#1a252f; border:1px solid #2c3e50; border-radius:10px; padding:10px 12px; font-size:14px; }
-  .ch-row .tag { font-size:11px; color:#7f8c8d; }
-  .ch-row button { padding:6px 10px; border:none; border-radius:8px; font-size:12px; cursor:pointer; }
-  .ch-view { background:#3498db; color:#fff; }
-  /* AI 输入栏 */
+  .ch-row { display:flex; align-items:center; justify-content:space-between; gap:8px; background:#1a252f; border:1px solid #2c3e50; border-radius:10px; padding:11px 12px; font-size:14px; cursor:pointer; }
+  .ch-row:active { background:#2c3e50; }
+  .ch-row .t { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ch-row .no { color:#7f8c8d; margin-right:6px; }
+  .ch-row .tag { font-size:11px; color:#95a5a6; white-space:nowrap; }
+  .tag .y { color:#27ae60; } .tag .n { color:#c0392b; }
+  .pager { display:flex; align-items:center; justify-content:space-between; margin-top:12px; font-size:13px; color:#95a5a6; }
+  .pager button { padding:8px 14px; border-radius:8px; background:#1a252f; border:1px solid #2c3e50; color:#ecf0f1; cursor:pointer; }
+  .pager button:disabled { opacity:.4; }
+  .rangebar { display:flex; flex-wrap:wrap; align-items:center; gap:10px; background:#151d24; border:1px solid #2c3e50; border-radius:10px; padding:10px 12px; margin-bottom:10px; font-size:13px; }
+  .rangebar input[type=number]{ width:66px; padding:7px 8px; border-radius:8px; border:1px solid #2c3e50; background:#0f1419; color:#e7e9ea; }
+  .rangebar label{ display:flex; align-items:center; gap:6px; }
+  .chk { gap:6px; }
+  .dock { position:fixed; left:0; right:0; bottom:var(--cmd-h); z-index:90; background:#0f1419; border-top:1px solid #2c3e50; padding:8px 16px 12px; max-height:var(--dock-max); overflow:auto; }
   .cmd-bar { position:fixed; bottom:0; left:0; right:0; background:#1a252f; border-top:1px solid #2c3e50; padding:10px 12px; display:flex; gap:8px; z-index:100; }
   .cmd-input { flex:1; padding:12px 14px; border-radius:22px; border:1px solid #2c3e50; background:#0f1419; color:#e7e9ea; font-size:15px; outline:none; }
   .cmd-input:focus { border-color:#3498db; }
   .cmd-send { width:44px; height:44px; border-radius:50%; background:#3498db; border:none; color:#fff; font-size:20px; cursor:pointer; }
-  /* 模态 */
   .mask { display:none; position:fixed; inset:0; background:rgba(0,0,0,.72); z-index:200; align-items:flex-end; justify-content:center; }
   .mask.show { display:flex; }
   .sheet { background:#1a252f; width:100%; max-width:560px; border-radius:16px 16px 0 0; padding:20px; max-height:88vh; overflow:auto; }
@@ -39,56 +58,149 @@
   .field label { display:block; font-size:12px; color:#95a5a6; margin-bottom:5px; }
   .field input, .field textarea, .field select { width:100%; padding:10px 12px; border-radius:8px; border:1px solid #2c3e50; background:#0f1419; color:#e7e9ea; font-size:14px; outline:none; }
   .field textarea { min-height:96px; resize:vertical; }
-  .row2 { display:flex; gap:10px; }
+  .field textarea.tall { min-height:180px; }
+  .row2 { display:flex; gap:10px; align-items:flex-end; }
   .row2 .field { flex:1; }
-  .actions { display:flex; gap:10px; margin-top:8px; }
-  .actions button { flex:1; padding:13px; border:none; border-radius:10px; font-size:15px; cursor:pointer; }
+  .actions { display:flex; gap:10px; margin-top:8px; flex-wrap:wrap; }
+  .actions button { flex:1; min-width:96px; padding:13px; border:none; border-radius:10px; font-size:15px; cursor:pointer; }
   .b-cancel { background:#2c3e50; color:#ecf0f1; }
   .b-run { background:#3498db; color:#fff; }
   .b-ok { background:#27ae60; color:#fff; }
+  .b-gray { background:#3a4750; color:#dfe4e8; }
+  .b-danger { background:#a33; color:#fff; }
   .loading { text-align:center; color:#7f8c8d; padding:24px; }
-  .kv { font-size:12px; color:#95a5a6; word-break:break-all; }
+  .kv { font-size:12px; color:#95a5a6; word-break:break-all; margin-top:8px; }
+  .utable { width:100%; border-collapse:collapse; font-size:13px; }
+  .utable th, .utable td { text-align:left; padding:9px 6px; border-bottom:1px solid #2c3e50; }
+  .utable th { color:#7f8c8d; font-weight:600; }
+  .utable button { padding:6px 10px; border-radius:8px; border:1px solid #2c3e50; background:#1a252f; color:#ecf0f1; cursor:pointer; font-size:12px; }
+  .pill { font-size:11px; padding:2px 7px; border-radius:10px; }
+  .pill.on { background:#1e4620; color:#27ae60; } .pill.off { background:#4a1e1e; color:#e74c3c; }
 </style>
 </head>
 <body>
 <div class="header">
-  <h1>📚 小说管理</h1>
-  <select class="novel-select" id="novelSel"><option value="">加载中…</option></select>
+  <div class="topbar">
+    <h1>📚 小说管理</h1>
+    <div class="who"><span id="who">未登录</span><button id="consoleBtn" style="display:none">👥 控制台</button><button id="logoutBtn" style="display:none">退出</button></div>
+  </div>
+  <div class="novel-row">
+    <select class="novel-select" id="novelSel"><option value="">— 选择小说 —</option></select>
+    <button class="newbtn" id="newNovelBtn">＋ 新建</button>
+  </div>
+  <div class="tabs">
+    <button class="tab active" data-tab="flow">流程管理</button>
+    <button class="tab" data-tab="menu">菜单 + AI</button>
+  </div>
 </div>
 
-<div class="section">
-  <div class="grp-title">操作</div>
-  <div class="btns" id="menuBtns"><div class="loading">加载菜单…</div></div>
+<!-- ===== 流程管理 ===== -->
+<div id="panel-flow" class="panel">
+  <div class="section" id="flowHint">还没有选择小说。点右上角「＋ 新建」创建一部，然后按 ① 设定 → ② 生成大纲 → ③ 逐章/区间生成正文 的顺序操作。</div>
+  <div id="flowBody" style="display:none">
+    <div class="section" style="padding-bottom:0">
+      <div class="grp-title">① 小说设定</div>
+      <div class="field"><label>书名 *</label><input id="setName"></div>
+      <div class="field"><label>故事简介</label><textarea id="setOutline"></textarea></div>
+      <div class="field"><label>角色 / 世界观设定</label><textarea id="setContent"></textarea></div>
+      <div class="field"><label>本书设定说明（读者向 · Markdown）</label><textarea id="setPreface" class="tall"></textarea></div>
+      <div class="btns"><button class="mbtn primary wide" id="saveSettings">💾 保存设定</button></div>
+      <div class="kv" id="setMeta"></div>
+    </div>
+    <div class="section">
+      <div class="grp-title">② 生成章节大纲</div>
+      <div class="row2">
+        <div class="field"><label>章节总数</label><input id="ogTotal" type="number" min="1" value="10"></div>
+        <div class="field" style="flex:2"><button class="mbtn primary" id="genOutlines">🧭 生成 / 重建全部大纲</button></div>
+      </div>
+      <div class="kv" id="ogMeta"></div>
+    </div>
+    <div class="section">
+      <div class="grp-title">③ 章节列表（每页 50 章 · 点击某章可看/改大纲并生成正文）</div>
+      <div class="rangebar">
+        <label>范围 从<input id="rgFrom" type="number" min="1" value="1"> 到<input id="rgTo" type="number" min="1" value="1"> 章</label>
+        <label class="chk"><input id="rgForce" type="checkbox"> 覆盖已有正文</label>
+      </div>
+      <div class="btns">
+        <button class="mbtn primary" id="rangeGen">✍️ 区间生成正文</button>
+        <button class="mbtn danger" id="rangeDel">🗑️ 区间删除章节</button>
+      </div>
+      <div class="btns" style="margin-top:8px">
+        <button class="mbtn" id="renumber">🔢 重排编号</button>
+        <button class="mbtn" id="flowCheck">🔍 一致性检查</button>
+        <button class="mbtn" id="flowPublish">🚀 发布</button>
+        <button class="mbtn" id="shareNovel">🔗 分享</button>
+        <button class="mbtn danger" id="delNovel">🗑️ 删除本书</button>
+      </div>
+      <div class="ch-list" id="chList" style="margin-top:12px"></div>
+      <div class="pager" id="chPager"></div>
+    </div>
+  </div>
 </div>
 
-<div class="section">
-  <div id="resultArea"></div>
+<!-- ===== 菜单 + AI ===== -->
+<div id="panel-menu" class="panel" style="display:none">
+  <div class="section">
+    <div class="grp-title">操作</div>
+    <div class="btns" id="menuBtns"><div class="loading">加载菜单…</div></div>
+  </div>
+</div>
+
+<div class="dock">
+  <div id="resultArea"><div class="grp-title">结果</div><div class="result">结果将显示在这里。</div></div>
 </div>
 
 <div class="cmd-bar">
-  <input type="text" class="cmd-input" id="cmdInput" placeholder="用一句话操作，如：删除第三章 / 列举小说" autocomplete="off">
+  <input type="text" class="cmd-input" id="cmdInput" placeholder="用一句话操作，如：删除第三章 / 生成正文" autocomplete="off">
   <button class="cmd-send" id="cmdSend">➤</button>
 </div>
 
-<!-- 参数/确认 底部弹层 -->
 <div class="mask" id="mask"><div class="sheet" id="sheet"></div></div>
 
 <script>
 const $ = (s) => document.querySelector(s);
+const enc = encodeURIComponent;
 const api = (p, opt) => fetch('/api' + p, opt).then(async r => {
   const j = await r.json().catch(() => ({}));
+  if (r.status === 401) { location.replace('/login/'); throw new Error('登录已过期'); }
   if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
   return j;
 });
 let MENU = [];
-let currentNovel = '';
+let ME = null;
+let currentNovel = '';   // 现保存 novel.id
+let CHAPS = [];
+let page = 0;
+const PER = 50;
 
-function novelFile() { return $('#novelSel').value || ''; }
-function setNovel(v) { currentNovel = v; $('#novelSel').value = v; }
+function novelFile() { return currentNovel || $('#novelSel').value || ''; }
+function requireNovel() { if (!novelFile()) { showResult('请先在顶部选择一部小说', 'err'); return null; } return novelFile(); }
+function requireNovelSilent() { return currentNovel || null; }
 
+// ── 标签切换 ──
+document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  const tab = t.dataset.tab;
+  $('#panel-flow').style.display = tab === 'flow' ? '' : 'none';
+  $('#panel-menu').style.display = tab === 'menu' ? '' : 'none';
+});
+
+// ── 启动：先确认登录态 ──
 async function boot() {
   try {
-    const [{ groups }, nv] = await Promise.all([ api('/menu'), api('/novels') ]);
+    const me = await fetch('/api/me').then(r => r.json());
+    if (!me || !me.user) { location.replace('/login/'); return; }
+    ME = me.user;
+    $('#who').textContent = ME.username + (ME.role === 'superadmin' ? '（超管）' : '');
+    $('#logoutBtn').style.display = '';
+    if (ME.role === 'superadmin') $('#consoleBtn').style.display = '';
+  } catch (e) { location.replace('/login/'); return; }
+  $('#logoutBtn').onclick = async () => { try { await fetch('/api/logout', { method: 'POST' }); } catch {} location.replace('/login/'); };
+  $('#consoleBtn').onclick = () => { location.href = '/admin/dashboard.html'; };
+
+  try {
+    const [{ groups }, nv] = await Promise.all([api('/menu'), api('/novels')]);
     MENU = groups || [];
     renderMenu();
     renderNovels(nv.novels || []);
@@ -99,111 +211,339 @@ function renderNovels(novels) {
   const sel = $('#novelSel');
   const prev = sel.value;
   sel.innerHTML = '<option value="">— 选择小说 —</option>' +
-    novels.map(n => `<option value="${n.file}">${n.name || n.file}（${n.chapterCount||0}章）</option>`).join('');
-  if (prev) sel.value = prev;
-  sel.onchange = () => { currentNovel = sel.value; };
+    novels.map(n => `<option value="${n.id}">${n.name || '未命名'}（${n.chapterCount || 0}章）</option>`).join('');
+  if (prev && novels.some(n => n.id === prev)) sel.value = prev;
+  else { sel.value = ''; currentNovel = ''; onNovelChange(); }
+}
+$('#novelSel').addEventListener('change', () => { currentNovel = $('#novelSel').value; onNovelChange(); });
+
+async function onNovelChange() {
+  const id = currentNovel;
+  if (!id) { $('#flowHint').style.display = ''; $('#flowBody').style.display = 'none'; CHAPS = []; return; }
+  $('#flowHint').style.display = 'none'; $('#flowBody').style.display = '';
+  await Promise.all([loadSettings(), loadChapters()]);
 }
 
+// ── 新建小说 ──
+$('#newNovelBtn').onclick = () => {
+  const s = $('#sheet');
+  s.innerHTML = `<h2>新建小说</h2><div class="desc">创建后即可在①继续完善设定（也可直接保存）。真实书名。</div>
+    <div class="field"><label>书名 *</label><input id="cTitle"></div>
+    <div class="field"><label>故事简介</label><textarea id="cOutline"></textarea></div>
+    <div class="field"><label>角色 / 世界观设定</label><textarea id="cContent"></textarea></div>
+    <div class="actions"><button class="b-cancel" id="ccancel">取消</button><button class="b-run" id="cok">创建</button></div>`;
+  $('#mask').classList.add('show');
+  $('#ccancel').onclick = closeModal;
+  $('#cok').onclick = async () => {
+    const title = $('#cTitle').value.trim();
+    if (!title) return showResult('书名不能为空', 'err');
+    closeModal(); showLoading('创建中…');
+    try {
+      const r = await api('/novels', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, outline: $('#cOutline').value, content: $('#cContent').value }) });
+      showResult(`✅ 已创建《${r.novel.name || title}》`, 'ok');
+      await reloadNovels();
+      currentNovel = r.novel.id; $('#novelSel').value = currentNovel; onNovelChange();
+    } catch (e) { showResult('❌ ' + e.message, 'err'); }
+  };
+};
+
+// ── 删除整本 ──
+$('#delNovel').onclick = async () => {
+  const id = requireNovel(); if (!id) return;
+  if (!confirm('确定删除整本小说？其数据文件将被移除，不可撤销。')) return;
+  try { await api(`/novels/${enc(id)}`, { method: 'DELETE' }); showResult('🗑️ 已删除该小说', 'ok'); currentNovel = ''; await reloadNovels(); onNovelChange(); }
+  catch (e) { showResult('❌ ' + e.message, 'err'); }
+};
+
+// ── ① 设定 ──
+async function loadSettings() {
+  const id = requireNovelSilent(); if (!id) return;
+  try {
+    const s = await api(`/novels/${enc(id)}/settings`);
+    $('#setName').value = s.name || '';
+    $('#setOutline').value = s.outline || '';
+    $('#setContent').value = s.content || '';
+    $('#setPreface').value = s.preface || '';
+    $('#setMeta').textContent = `版本 ${s.version || 0}`;
+    $('#ogTotal').value = s.chapterCount || 10;
+    $('#ogMeta').textContent = `共 ${s.chapterCount || 0} 章 · 有大纲 ${s.outlineCount || 0} · 有正文 ${s.bodyCount || 0}`;
+  } catch (e) { showResult('读取设定失败：' + e.message, 'err'); }
+}
+
+$('#saveSettings').onclick = async () => {
+  const id = requireNovel(); if (!id) return;
+  if (!$('#setName').value.trim()) return showResult('书名不能为空', 'err');
+  showLoading('保存设定中…');
+  try {
+    const r = await api(`/novels/${enc(id)}/settings`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: $('#setName').value, outline: $('#setOutline').value, content: $('#setContent').value, preface: $('#setPreface').value }) });
+    showResult(`✅ 设定已保存（${r.action}${r.version ? ' v' + r.version : ''}）`, 'ok');
+    loadSettings(); reloadNovels();
+  } catch (e) { showResult('❌ ' + e.message, 'err'); }
+};
+
+// ── ② 生成大纲 ──
+$('#genOutlines').onclick = async () => {
+  const id = requireNovel(); if (!id) return;
+  const total = Number($('#ogTotal').value || 0);
+  if (!total || total < 1) return showResult('请填写章节总数', 'err');
+  if (!confirm(`将按当前设定生成 ${total} 章大纲（若已有大纲会被重建覆盖）。继续？`)) return;
+  showLoading(`生成 ${total} 章大纲中…（LLM 调用，可能需数十秒）`);
+  try {
+    const r = await api('/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'generateChapterOutlines', novelId: id, totalChapters: total }) });
+    showResult(r.result || '✅ 大纲已生成', 'ok');
+    await Promise.all([loadChapters(), loadSettings()]);
+  } catch (e) { showResult('❌ ' + e.message, 'err'); }
+};
+
+// ── ③ 章节列表 ──
+async function loadChapters() {
+  const id = requireNovelSilent(); if (!id) { CHAPS = []; return; }
+  try {
+    const r = await api(`/novels/${enc(id)}/chapters`);
+    CHAPS = r.chapters || [];
+    const maxNo = CHAPS.length ? CHAPS[CHAPS.length - 1].no : 1;
+    $('#rgTo').value = maxNo; if (Number($('#rgFrom').value) > maxNo) $('#rgFrom').value = 1;
+    renderChapters();
+  } catch (e) { showResult('读取章节失败：' + e.message, 'err'); }
+}
+
+function yn(b) { return b ? '<span class="y">✓</span>' : '<span class="n">✗</span>'; }
+function renderChapters() {
+  const total = CHAPS.length;
+  const pages = Math.max(1, Math.ceil(total / PER));
+  if (page >= pages) page = pages - 1; if (page < 0) page = 0;
+  const slice = CHAPS.slice(page * PER, page * PER + PER);
+  $('#chList').innerHTML = slice.length ? slice.map(c => `
+    <div class="ch-row" data-no="${c.no}">
+      <div class="t"><span class="no">第${c.no}章</span>${escapeHtml(c.name || '（无标题）')}</div>
+      <div class="tag">纲 ${yn(!!(c.outline && String(c.outline).trim()))} 文 ${yn(c.hasContent)}</div>
+    </div>`).join('') : '<div class="loading">暂无章节，先在②生成大纲</div>';
+  $('#chList').querySelectorAll('.ch-row').forEach(row => row.onclick = () => openChapter(Number(row.dataset.no)));
+  $('#chPager').innerHTML = `<button id="pgPrev" ${page <= 0 ? 'disabled' : ''}>‹ 上一页</button><span>第 ${page + 1}/${pages} 页 · 共 ${total} 章</span><button id="pgNext" ${page >= pages - 1 ? 'disabled' : ''}>下一页 ›</button>`;
+  $('#pgPrev').onclick = () => { page--; renderChapters(); };
+  $('#pgNext').onclick = () => { page++; renderChapters(); };
+}
+
+function chapByNo(no) { return CHAPS.find(c => c.no === no); }
+
+async function openChapter(no) {
+  const id = requireNovel(); if (!id) return;
+  const c = chapByNo(no) || {};
+  const s = $('#sheet');
+  s.innerHTML = `
+    <h2>第${no}章</h2>
+    <div class="desc">可修改标题与大纲并保存，或按大纲生成正文。</div>
+    <div class="field"><label>章节标题</label><input id="chName" value="${escapeHtml(c.name || '')}"></div>
+    <div class="field"><label>章节大纲</label><textarea id="chOutline" class="tall">${escapeHtml(c.outline || '')}</textarea></div>
+    <div class="field"><label>正文（只读预览）</label><textarea id="chBody" class="tall" readonly placeholder="尚未生成正文"></textarea></div>
+    <div class="actions">
+      <button class="b-gray" id="chLoad">查看正文</button>
+      <button class="b-run" id="chSaveO">保存大纲</button>
+      <button class="b-ok" id="chGen">生成正文</button>
+    </div>
+    <div class="actions">
+      <button class="b-cancel" id="chClose">关闭</button>
+      <button class="b-danger" id="chDel">🗑️ 删除本章</button>
+    </div>`;
+  $('#mask').classList.add('show');
+  $('#chClose').onclick = closeModal;
+  $('#chSaveO').onclick = () => saveOutline(no);
+  $('#chGen').onclick = () => genOne(no, false);
+  $('#chLoad').onclick = async () => {
+    try { const r = await api(`/novels/${enc(id)}/chapter/${no}`); $('#chBody').value = (r.chapter && r.chapter.content) || '（该章暂无正文）'; }
+    catch (e) { showResult('❌ ' + e.message, 'err'); }
+  };
+  $('#chDel').onclick = () => delOne(no);
+}
+
+async function saveOutline(no) {
+  const id = requireNovel(); if (!id) return;
+  showLoading(`保存第 ${no} 章大纲…`);
+  try {
+    await api(`/novels/${enc(id)}/chapter/${no}/outline`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: $('#chName').value, outline: $('#chOutline').value }) });
+    showResult(`✅ 第 ${no} 章大纲已保存`, 'ok');
+    closeModal(); loadChapters(); loadSettings();
+  } catch (e) { showResult('❌ ' + e.message, 'err'); }
+}
+
+async function genOne(no, force) {
+  const id = requireNovel(); if (!id) return;
+  closeModal();
+  showLoading(`生成第 ${no} 章正文中…（LLM，可能需数十秒）`);
+  try {
+    const r = await api('/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'generate', novelId: id, chapter: no, force: !!force }) });
+    showResult(r.result || `✅ 第 ${no} 章正文已生成`, 'ok');
+    loadChapters(); loadSettings();
+  } catch (e) { showResult('❌ ' + e.message, 'err'); }
+}
+
+async function delOne(no) {
+  const id = requireNovel(); if (!id) return;
+  if (!confirm(`确定删除第 ${no} 章？后续章节会自动重排编号，不可撤销。`)) return;
+  closeModal();
+  try {
+    await api(`/novels/${enc(id)}/chapter/${no}`, { method: 'DELETE' });
+    showResult(`🗑️ 已删除第 ${no} 章（后续自动重排）`, 'ok');
+    loadChapters(); loadSettings();
+  } catch (e) { showResult('❌ ' + e.message, 'err'); }
+}
+
+// ── 区间批量 ──
+let progressBuf = '';
+function startProgress(t) { progressBuf = t; showResult(progressBuf, ''); }
+function dockLine(t) { progressBuf += (progressBuf ? '\n' : '') + t; showResult(progressBuf, ''); }
+
+$('#rangeGen').onclick = async () => {
+  const id = requireNovel(); if (!id) return;
+  const from = Number($('#rgFrom').value), to = Number($('#rgTo').value), force = $('#rgForce').checked;
+  if (!from || !to || from < 1 || to < from) return showResult('区间范围不合法', 'err');
+  if (to - from > 100 && !confirm(`将逐章生成 ${from}–${to}（共 ${to - from + 1} 章），耗时很长，确定？`)) return;
+  startProgress(`✍️ 区间生成正文 ${from}–${to}${force ? '（覆盖）' : '（跳过已有）'}\n`);
+  let ok = 0, skip = 0, fail = 0;
+  for (let ch = from; ch <= to; ch++) {
+    const c = chapByNo(ch);
+    if (!c) { dockLine(`第${ch}章：不存在，跳过`); skip++; continue; }
+    if (!force && c.hasContent) { dockLine(`第${ch}章：已有正文，跳过`); skip++; continue; }
+    if (!(c.outline && String(c.outline).trim())) { dockLine(`第${ch}章：无大纲，跳过`); skip++; continue; }
+    dockLine(`第${ch}章：生成中…`);
+    try { await api('/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'generate', novelId: id, chapter: ch, force }) }); dockLine(`第${ch}章：✅ 完成`); ok++; }
+    catch (e) { dockLine(`第${ch}章：❌ ${e.message}`); fail++; }
+    await loadChaptersQuiet();
+  }
+  dockLine(`\n合计：成功 ${ok} · 跳过 ${skip} · 失败 ${fail}`);
+  loadChapters(); loadSettings();
+};
+
+async function loadChaptersQuiet() {
+  const id = requireNovelSilent(); if (!id) return;
+  try { const r = await api(`/novels/${enc(id)}/chapters`); CHAPS = r.chapters || []; } catch {}
+}
+
+$('#rangeDel').onclick = async () => {
+  const id = requireNovel(); if (!id) return;
+  const from = Number($('#rgFrom').value), to = Number($('#rgTo').value);
+  if (!from || !to || from < 1 || to < from) return showResult('区间范围不合法', 'err');
+  if (!confirm(`确定删除第 ${from}–${to} 章（共 ${to - from + 1} 章）？删除后自动重排编号，不可撤销。`)) return;
+  startProgress(`🗑️ 区间删除 ${from}–${to}\n`);
+  for (let ch = to; ch >= from; ch--) {
+    try { await api(`/novels/${enc(id)}/chapter/${ch}`, { method: 'DELETE' }); dockLine(`第${ch}章：已删除`); }
+    catch (e) { dockLine(`第${ch}章：❌ ${e.message}`); }
+  }
+  dockLine('\n删除完成，已重排编号。');
+  loadChapters(); loadSettings(); reloadNovels();
+};
+
+$('#renumber').onclick = async () => {
+  const id = requireNovel(); if (!id) return;
+  try { const r = await api(`/novels/${enc(id)}/renumber`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); showResult(`🔢 重排完成（处理 ${r.shiftedCount} 章）`, 'ok'); loadChapters(); }
+  catch (e) { showResult('❌ ' + e.message, 'err'); }
+};
+$('#flowCheck').onclick = async () => {
+  const id = requireNovel(); if (!id) return;
+  showLoading('一致性检查中…（全书扫描，可能需数十秒）');
+  try { const r = await api(`/novels/${enc(id)}/check`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ withBody: false }) }); showResult('🔍 体检报告\n' + JSON.stringify(r.report, null, 2), 'ok'); }
+  catch (e) { showResult('❌ ' + e.message, 'err'); }
+};
+$('#flowPublish').onclick = () => doPublish();
+
+// ── 通用动作执行（菜单） ──
+function findItem(key) { for (const g of MENU) for (const it of g.items) if (it.key === key) return it; return null; }
+
 function renderMenu() {
-  const box = $('#menuBtns');
-  let html = '';
+  const box = $('#menuBtns'); let html = '';
   MENU.forEach(g => {
     html += `<div style="flex-basis:100%;margin-top:6px" class="grp-title">${g.group}</div>`;
     g.items.forEach(it => {
       const wide = (it.label.length > 7) ? ' wide' : '';
-      html += `<button class="mbtn${wide}" data-key="${it.key}" data-label="${it.label}" data-desc="${it.desc||''}" data-needs="${it.needsNovel?'1':'0'}">${it.label}</button>`;
+      html += `<button class="mbtn${wide}" data-key="${it.key}" data-label="${it.label}" data-desc="${it.desc || ''}" data-needs="${it.needsNovel ? '1' : '0'}">${it.label}</button>`;
     });
   });
   box.innerHTML = html;
   box.querySelectorAll('.mbtn').forEach(b => b.onclick = () => onAction(b));
 }
 
-function findItem(key) {
-  for (const g of MENU) for (const it of g.items) if (it.key === key) return it;
-  return null;
-}
-
-// 动作 → 需要的表单字段
 function fieldsFor(key) {
   switch (key) {
-    case 'saveNovelPlan': return [
-      { n:'info.name', l:'小说名称', t:'text', req:1 },
-      { n:'info.outline', l:'故事简介', t:'area' },
-      { n:'info.content', l:'角色/世界观设定', t:'area' }];
-    case 'generateChapterOutlines': return [{ n:'totalChapters', l:'章节总数', t:'number', def:10 }];
-    case 'addChapterOutline': return [
-      { n:'info.no', l:'插入位置(章号)', t:'number' }, { n:'info.name', l:'章节标题', t:'text' }, { n:'info.outline', l:'章节大纲', t:'area' }];
-    case 'updateChapterOutline': return [
-      { n:'info.no', l:'章号', t:'number', req:1 }, { n:'info.name', l:'章节标题', t:'text' }, { n:'info.outline', l:'章节大纲', t:'area' }];
-    case 'generate': return [
-      { n:'chapter', l:'章号(0=批量补缺)', t:'number', def:0 },
-      { n:'force', l:'覆盖已有正文', t:'bool' }];
-    case 'add': return [
-      { n:'chapter', l:'章号(留空=末尾追加)', t:'number' },
-      { n:'info.name', l:'章节标题', t:'text' }, { n:'info.content', l:'章节正文', t:'area', req:1 }];
-    case 'modify': return [
-      { n:'chapter', l:'章号', t:'number', req:1 }, { n:'modifyInstructions', l:'修改要求', t:'area', req:1 }];
-    case 'delete': return [{ n:'chapter', l:'章号', t:'number', req:1 }];
-    case 'savePreface': return [{ n:'preface', l:'设定说明(Markdown)', t:'area', req:1 }];
-    case 'setParts': return [{ n:'parts', l:'分部 JSON', t:'json', def:'[{"name":"第一部","from":1,"to":5}]' }];
-    case 'generatePartIntros': return [{ n:'partNo', l:'部序号(留空=全部)', t:'number' }];
-    case 'updateNovelPlan': return [
-      { n:'modificationType', l:'修改类型', t:'select', opts:['updateNovelInfo','updateChapterOutline','addChapterOutline','deleteChapter','reNumberChapters'] },
-      { n:'info', l:'info JSON', t:'json', def:'{}' }];
+    case 'saveNovelPlan': return [{ n: 'info.name', l: '小说名称', t: 'text', req: 1 }, { n: 'info.outline', l: '故事简介', t: 'area' }, { n: 'info.content', l: '角色/世界观设定', t: 'area' }];
+    case 'generateChapterOutlines': return [{ n: 'totalChapters', l: '章节总数', t: 'number', def: 10 }];
+    case 'addChapterOutline': return [{ n: 'info.no', l: '插入位置(章号)', t: 'number' }, { n: 'info.name', l: '章节标题', t: 'text' }, { n: 'info.outline', l: '章节大纲', t: 'area' }];
+    case 'updateChapterOutline': return [{ n: 'info.no', l: '章号', t: 'number', req: 1 }, { n: 'info.name', l: '章节标题', t: 'text' }, { n: 'info.outline', l: '章节大纲', t: 'area' }];
+    case 'generate': return [{ n: 'chapter', l: '章号(0=批量补缺)', t: 'number', def: 0 }, { n: 'force', l: '覆盖已有正文', t: 'bool' }];
+    case 'add': return [{ n: 'chapter', l: '章号(留空=末尾追加)', t: 'number' }, { n: 'info.name', l: '章节标题', t: 'text' }, { n: 'info.content', l: '章节正文', t: 'area', req: 1 }];
+    case 'modify': return [{ n: 'chapter', l: '章号', t: 'number', req: 1 }, { n: 'modifyInstructions', l: '修改要求', t: 'area', req: 1 }];
+    case 'delete': return [{ n: 'chapter', l: '章号', t: 'number', req: 1 }];
+    case 'savePreface': return [{ n: 'preface', l: '设定说明(Markdown)', t: 'area', req: 1 }];
+    case 'setParts': return [{ n: 'parts', l: '分部 JSON', t: 'json', def: '[{"name":"第一部","from":1,"to":5}]' }];
+    case 'generatePartIntros': return [{ n: 'partNo', l: '部序号(留空=全部)', t: 'number' }];
+    case 'updateNovelPlan': return [{ n: 'modificationType', l: '修改类型', t: 'select', opts: ['updateNovelInfo', 'updateChapterOutline', 'addChapterOutline', 'deleteChapter', 'reNumberChapters'] }, { n: 'info', l: 'info JSON', t: 'json', def: '{}' }];
     default: return [];
   }
 }
 
 function onAction(btn) {
   const key = btn.dataset.key, label = btn.dataset.label, desc = btn.dataset.desc, needs = btn.dataset.needs === '1';
-  if (needs && !novelFile()) { showResult('请先在顶部选择一部小说', 'err'); return; }
+  if (needs && !novelFile()) { showResult('请先在顶部选择一部小说（或点「＋ 新建」）', 'err'); return; }
   if (key === 'publish') { doPublish(); return; }
   const fields = fieldsFor(key);
   if (fields.length === 0) { runSimple(key, label); return; }
   openParamSheet(key, label, desc, fields);
 }
 
-// 无需参数的动作
 async function runSimple(key, label) {
   showLoading(`执行：${label}`);
   try {
     const body = { action: key };
-    if (novelFile()) body.dbPath = novelFile();
-    const r = await api('/run', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    if (novelFile()) body.novelId = novelFile();
+    const r = await api('/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     showResult(r.result || '✅ 完成', 'ok');
-    if (key === 'listNovels') renderNovels((r.result && r.result.novels) || await api('/novels').then(x=>x.novels));
-    refreshIfChapters(key);
+    onNovelChange();
   } catch (e) { showResult('❌ ' + e.message, 'err'); }
 }
 
-function refreshIfChapters(key) {
-  if (['generate','add','delete','modify','reNumberChapters','generateChapterOutlines','addChapterOutline','updateChapterOutline'].includes(key)) {
-    // 章节结构可能变化，若有选中库则刷新提示
-  }
-}
-
 async function doPublish() {
-  const dbPath = novelFile();
-  if (!dbPath) return showResult('请先选择小说', 'err');
+  const id = requireNovel(); if (!id) return;
   showLoading('发布中，生成静态页…');
   try {
-    const r = await api(`/novels/${encodeURIComponent(dbPath)}/publish`, { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
-    showResult(`✅ 已发布 ${r.chapterCount} 章\n📖 阅读地址：${r.indexUrl}\n（手机同网段访问 http://<本机IP>:3400${r.indexUrl}）`, 'ok');
+    const r = await api(`/novels/${enc(id)}/publish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    showResult(`✅ 已发布 ${r.chapterCount} 章\n📖 阅读地址：${r.indexUrl}`, 'ok');
   } catch (e) { showResult('❌ 发布失败：' + e.message, 'err'); }
 }
 
-// 参数弹层
+// ── 分享：复制当前小说的已发布阅读地址到剪贴板 ──
+$('#shareNovel').onclick = async () => {
+  const id = requireNovel(); if (!id) return;
+  try {
+    const r = await api(`/novels/${enc(id)}/share`);
+    const full = location.origin + r.url;
+    if (!r.published && !confirm(`《${r.title || '未命名'}》尚未发布（或书名已改），链接可能打不开。\n建议先点「🚀 发布」。仍要复制该链接吗？`)) return;
+    await copyText(full);
+    showResult(`🔗 分享链接已复制到剪贴板：\n${full}`, 'ok');
+  } catch (e) { showResult('❌ ' + e.message, 'err'); }
+};
+
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return; }
+  } catch (e) { /* 降级到 execCommand */ }
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.focus(); ta.select();
+  let ok = false; try { ok = document.execCommand('copy'); } catch (e) {}
+  document.body.removeChild(ta);
+  if (!ok) throw new Error('浏览器不允许自动复制，请长按/右键手动复制上面的链接');
+}
+
 function openParamSheet(key, label, desc, fields) {
   const s = $('#sheet');
-  let html = `<h2>${label}</h2>${desc?`<div class="desc">${desc}</div>`:''}`;
+  let html = `<h2>${label}</h2>${desc ? `<div class="desc">${desc}</div>` : ''}`;
   fields.forEach((f, i) => {
     const id = 'f_' + i;
-    if (f.t === 'area') html += `<div class="field"><label>${f.l}${f.req?' *':''}</label><textarea id="${id}" data-n="${f.n}"></textarea></div>`;
-    else if (f.t === 'json') html += `<div class="field"><label>${f.l}（JSON）</label><textarea id="${id}" data-n="${f.n}" data-json="1">${f.def||'{}'}</textarea></div>`;
-    else if (f.t === 'number') html += `<div class="field"><label>${f.l}</label><input id="${id}" data-n="${f.n}" type="number" value="${f.def??''}"></div>`;
+    if (f.t === 'area') html += `<div class="field"><label>${f.l}${f.req ? ' *' : ''}</label><textarea id="${id}" data-n="${f.n}"></textarea></div>`;
+    else if (f.t === 'json') html += `<div class="field"><label>${f.l}（JSON）</label><textarea id="${id}" data-n="${f.n}" data-json="1">${f.def || '{}'}</textarea></div>`;
+    else if (f.t === 'number') html += `<div class="field"><label>${f.l}</label><input id="${id}" data-n="${f.n}" type="number" value="${f.def ?? ''}"></div>`;
     else if (f.t === 'bool') html += `<div class="field"><label>${f.l}</label><select id="${id}" data-n="${f.n}"><option value="0">否</option><option value="1">是</option></select></div>`;
-    else if (f.t === 'select') html += `<div class="field"><label>${f.l}</label><select id="${id}" data-n="${f.n}">${f.opts.map(o=>`<option>${o}</option>`).join('')}</select></div>`;
-    else html += `<div class="field"><label>${f.l}${f.req?' *':''}</label><input id="${id}" data-n="${f.n}" type="text"></div>`;
+    else if (f.t === 'select') html += `<div class="field"><label>${f.l}</label><select id="${id}" data-n="${f.n}">${f.opts.map(o => `<option>${o}</option>`).join('')}</select></div>`;
+    else html += `<div class="field"><label>${f.l}${f.req ? ' *' : ''}</label><input id="${id}" data-n="${f.n}" type="text"></div>`;
   });
   html += `<div class="actions"><button class="b-cancel" id="scancel">取消</button><button class="b-run" id="srun">执行</button></div>`;
   s.innerHTML = html;
@@ -222,7 +562,6 @@ function collect(fields) {
     else if (f.t === 'number') v = (v === '' ? undefined : Number(v));
     else if (f.t === 'json') { try { v = JSON.parse(v || '{}'); } catch { throw new Error(f.l + ' 不是合法 JSON'); } }
     if (v === undefined || v === '') { if (f.req) throw new Error(f.l + ' 必填'); else continue; }
-    // 嵌套 info.xxx
     const parts = f.n.split('.');
     let cur = body;
     for (let k = 0; k < parts.length - 1; k++) { cur[parts[k]] = cur[parts[k]] || {}; cur = cur[parts[k]]; }
@@ -237,18 +576,19 @@ async function submitParam(key, fields) {
   closeModal();
   showLoading('执行中…（生成/检查类可能需数十秒）');
   try {
-    const body = { action: key, dbPath: novelFile(), ...extra };
-    const r = await api('/run', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const body = { action: key, ...extra };
+    if (novelFile()) body.novelId = novelFile();
+    const r = await api('/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     showResult(r.result || '✅ 完成', 'ok');
-    reloadNovels();
+    reloadNovels(); onNovelChange();
   } catch (e) { showResult('❌ ' + e.message, 'err'); }
 }
 
 async function reloadNovels() {
-  try { const nv = await api('/novels'); renderNovels(nv.novels || []); setNovel(novelFile()); } catch {}
+  try { const nv = await api('/novels'); renderNovels(nv.novels || []); } catch {}
 }
 
-// ── 单轮 AI 窗口 ──
+// ── 单轮 AI 窗口（全局） ──
 $('#cmdSend').onclick = aiPlan;
 $('#cmdInput').addEventListener('keydown', e => { if (e.key === 'Enter') aiPlan(); });
 
@@ -258,7 +598,7 @@ async function aiPlan() {
   $('#cmdInput').value = '';
   showLoading('AI 解析中…');
   try {
-    const p = await api('/ai/plan', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ userInput, novelFile: novelFile() }) });
+    const p = await api('/ai/plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userInput, novelId: novelFile() }) });
     if (!p.tool) { showResult('🤔 ' + (p.reason || '无法识别指令'), 'err'); return; }
     openConfirmCard(p);
   } catch (e) { showResult('❌ ' + e.message, 'err'); }
@@ -269,7 +609,7 @@ function openConfirmCard(p) {
   const argsStr = JSON.stringify(p.args, null, 2);
   s.innerHTML = `
     <h2>🤖 AI 拟执行</h2>
-    <div class="desc">工具：<b>${p.tool}</b>${p.reason?`　${p.reason}`:''}</div>
+    <div class="desc">工具：<b>${p.tool}</b>${p.reason ? `　${p.reason}` : ''}</div>
     <div class="field"><label>参数（可修改）</label><textarea id="aiargs" style="min-height:150px">${argsStr}</textarea></div>
     <div class="actions"><button class="b-cancel" id="aicancel">取消</button><button class="b-ok" id="aiconfirm">确认执行</button></div>`;
   $('#mask').classList.add('show');
@@ -284,21 +624,18 @@ async function aiExecute(tool, argsRaw) {
   closeModal();
   showLoading(`执行 ${tool} 中…`);
   try {
-    const r = await api('/ai/execute', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ tool, args }) });
+    const r = await api('/ai/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tool, args }) });
     showResult(typeof r.result === 'string' ? r.result : JSON.stringify(r.result, null, 2), 'ok');
-    reloadNovels();
+    reloadNovels(); onNovelChange();
   } catch (e) { showResult('❌ ' + e.message, 'err'); }
 }
-
-// 查看章节（点击小说时）
-$('#novelSel').addEventListener('change', () => { currentNovel = $('#novelSel').value; });
 
 function closeModal() { $('#mask').classList.remove('show'); }
 $('#mask').addEventListener('click', e => { if (e.target === $('#mask')) closeModal(); });
 
-function showLoading(t) { $('#resultArea').innerHTML = `<div class="result"><div class="loading">${t}</div></div>`; }
-function showResult(t, cls) { $('#resultArea').innerHTML = `<div class="grp-title">结果</div><div class="result ${cls||''}">${escapeHtml(t)}</div>`; }
-function escapeHtml(s){ return String(s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function showLoading(t) { $('#resultArea').innerHTML = `<div class="grp-title">结果</div><div class="result"><div class="loading">${t}</div></div>`; }
+function showResult(t, cls) { $('#resultArea').innerHTML = `<div class="grp-title">结果</div><div class="result ${cls || ''}">${escapeHtml(t)}</div>`; }
+function escapeHtml(s) { return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
 
 boot();
 </script>

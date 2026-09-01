@@ -413,7 +413,7 @@ function escapeHtml(text) {
  * @param {string} name - 小说标题
  * @returns {string} 目录名
  */
-function sanitizeDirName(name) {
+export function sanitizeDirName(name) {
   const sanitized = String(name || '')
     .replace(/[\\/:*?"<>|]/g, '_')
     .replace(/\s+/g, '')
@@ -1560,6 +1560,7 @@ export async function publishNovel(sessionDir, serverConfig, options = {}) {
       title: `${novelTitle} - ${displayTitle}`,
       chapterNum: i + 1,
       partNo: part ? part.no : 0,
+      chapterText: chapter.content,
       markdown: `# ${displayTitle}\n\n${kicker}${stripLeadingHeading(chapter.content)}`
     });
   });
@@ -1935,6 +1936,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 // ainovel 本地发布：复用上方章节页生成逻辑，直接写文件到 public/novel/
 // 取代原 SSH 上传（方案 C：ainovel 本地服务直连，手机浏览器直接访问）
 // ─────────────────────────────────────────────────────────────
+/** 在章节页注入阅读器数据（如预生成的测试题），置于 reader.js 之前；转义 < 防止 </script> 截断 */
+function injectReaderData(html, data) {
+  const json = JSON.stringify(data).replace(/</g, '\\u003c');
+  const tag = `<script id="novel-reader-data" type="application/json">${json}</script>`;
+  const marker = '<script src="/tts/reader.js"></script>';
+  return html.includes(marker) ? html.replace(marker, tag + marker) : html.replace('</body>', tag + '</body>');
+}
+
 /**
  * 本地发布一本小说：从数据库读取章节，生成静态 HTML 写入 outRoot/<小说名>/
  * @param {string} dbPath - 小说库绝对路径
@@ -2016,7 +2025,16 @@ export async function publishNovelLocal(dbPath, outRoot, options = {}) {
     const prevUrl = s > 0 ? sequence[s - 1].filename : null;
     const nextUrl = s < sequence.length - 1 ? sequence[s + 1].filename : null;
     const navHtml = buildChapterNav(prevUrl, nextUrl);
-    const htmlContent = markdownToHtml(page.markdown, page.title, navHtml);
+    let htmlContent = markdownToHtml(page.markdown, page.title, navHtml);
+    // 发布时预生成章节测试并内嵌：读者端打开测试零 LLM、即时呈现；失败则回退按需生成，绝不阻断发布
+    if (page.kind === 'chapter' && typeof options.generateQuiz === 'function') {
+      try {
+        const questions = await options.generateQuiz(page.chapterText || page.markdown, options.quizAge || 9);
+        if (Array.isArray(questions) && questions.length) {
+          htmlContent = injectReaderData(htmlContent, { quiz: { age: options.quizAge || 9, questions } });
+        }
+      } catch { /* 预生成失败：跳过内嵌 */ }
+    }
     const localPath = path.join(targetDir, page.filename);
     fs.writeFileSync(localPath, htmlContent, 'utf-8');
     written.push(page.filename);
@@ -2040,7 +2058,8 @@ export async function publishNovelLocal(dbPath, outRoot, options = {}) {
   });
   fs.writeFileSync(path.join(targetDir, 'index.html'), indexContent, 'utf-8');
 
-  const indexUrl = `/novel/${novelDir}/index.html`;
+  const urlBase = String(options.urlBase || '/novel').replace(/\/+$/, '');
+  const indexUrl = `${urlBase}/${novelDir}/index.html`;
   console.log(`✅ 本地发布完成: ${targetDir}（${chapterPages.length} 章）→ ${indexUrl}`);
   return { novelDir, indexUrl, chapterCount: chapterPages.length, files: [...written, 'index.html'] };
 }
@@ -2050,15 +2069,15 @@ export async function publishNovelLocal(dbPath, outRoot, options = {}) {
  * @param {Array<{dirName:string,title:string,chapterCount:number}>} novels
  * @param {string} outRoot
  */
-export function publishSiteIndexLocal(novels, outRoot) {
+export function publishSiteIndexLocal(novels, outRoot, urlBase = '/novel') {
   fs.mkdirSync(outRoot, { recursive: true });
   // generateSiteIndex 消费字段：name / url / updatedText
   const items = novels.map((n) => ({
     name: n.title || n.name,
-    url: `/novel/${n.dirName}/index.html`,
+    url: `${String(urlBase).replace(/\/+$/, '')}/${n.dirName}/index.html`,
     updatedText: (n.chapterCount != null ? `${n.chapterCount} 章` : '')
   }));
   const html = generateSiteIndex(items, '小说列表');
   fs.writeFileSync(path.join(outRoot, 'index.html'), html, 'utf-8');
-  return { indexUrl: '/novel/index.html', count: items.length };
+  return { indexUrl: `${String(urlBase).replace(/\/+$/, '')}/index.html`, count: items.length };
 }

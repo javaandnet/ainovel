@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>控制台 · 用户管理</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:#0f1419; color:#e7e9ea; min-height:100vh; padding-bottom:24px; }
+  .header { background:#1a252f; padding:14px 16px; position:sticky; top:0; z-index:100; border-bottom:1px solid #2c3e50; }
+  .topbar { display:flex; align-items:center; justify-content:space-between; }
+  .header h1 { font-size:17px; font-weight:600; }
+  .who { font-size:12px; color:#95a5a6; display:flex; align-items:center; gap:8px; }
+  .who button { padding:6px 10px; font-size:12px; border-radius:8px; background:#2c3e50; color:#ecf0f1; border:none; cursor:pointer; }
+  .section { padding:14px 16px; }
+  .grp-title { font-size:12px; color:#7f8c8d; letter-spacing:1px; margin:8px 0 10px; }
+  .cards { display:flex; gap:10px; }
+  .card { flex:1; background:#1a252f; border:1px solid #2c3e50; border-radius:12px; padding:14px 10px; text-align:center; }
+  .card .num { font-size:24px; font-weight:700; color:#3498db; }
+  .card .lbl { font-size:12px; color:#7f8c8d; margin-top:4px; }
+  .row2 { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; }
+  .row2 .field { flex:1; min-width:120px; }
+  .field { margin-bottom:12px; }
+  .field label { display:block; font-size:12px; color:#95a5a6; margin-bottom:5px; }
+  .field input, .field select { width:100%; padding:10px 12px; border-radius:8px; border:1px solid #2c3e50; background:#0f1419; color:#e7e9ea; font-size:14px; outline:none; }
+  .btns { display:flex; flex-wrap:wrap; gap:10px; }
+  .mbtn { flex:1 1 100%; padding:13px 10px; border-radius:12px; background:#1a252f; border:1px solid #2c3e50; color:#ecf0f1; font-size:14px; cursor:pointer; }
+  .mbtn.primary { background:#2472a4; border-color:#2472a4; }
+  .tablewrap { overflow-x:auto; }
+  .utable { width:100%; border-collapse:collapse; font-size:13px; min-width:520px; }
+  .utable th, .utable td { text-align:left; padding:9px 6px; border-bottom:1px solid #2c3e50; white-space:nowrap; }
+  .utable th { color:#7f8c8d; font-weight:600; }
+  .utable td.u { white-space:normal; min-width:88px; }
+  .utable button { padding:6px 9px; border-radius:8px; border:1px solid #2c3e50; background:#1a252f; color:#ecf0f1; cursor:pointer; font-size:12px; }
+  .utable button.pw { border-color:#2472a4; color:#7fc4f0; }
+  .pill { font-size:11px; padding:2px 7px; border-radius:10px; }
+  .pill.on { background:#1e4620; color:#27ae60; } .pill.off { background:#4a1e1e; color:#e74c3c; }
+  .self { font-size:10px; color:#f39c12; margin-left:4px; }
+  .toast { position:fixed; left:50%; bottom:30px; transform:translateX(-50%); background:#2c3e50; color:#ecf0f1; padding:11px 18px; border-radius:22px; font-size:14px; box-shadow:0 4px 16px rgba(0,0,0,.4); opacity:0; transition:opacity .2s; pointer-events:none; z-index:300; max-width:88vw; }
+  .toast.show { opacity:1; } .toast.err { background:#7c2d2d; }
+  .loading { text-align:center; color:#7f8c8d; padding:24px; }
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="topbar">
+    <h1>👥 控制台</h1>
+    <div class="who"><span id="who">—</span><button id="novelsBtn">📚 小说管理</button><button id="logoutBtn">退出</button></div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="grp-title">平台概览</div>
+  <div class="cards">
+    <div class="card"><div class="num" id="cUsers">–</div><div class="lbl">用户总数</div></div>
+    <div class="card"><div class="num" id="cDisabled">–</div><div class="lbl">已禁用</div></div>
+    <div class="card"><div class="num" id="cNovels">–</div><div class="lbl">小说总数</div></div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="grp-title">新建用户</div>
+  <div class="row2">
+    <div class="field"><label>用户名</label><input id="nu" autocomplete="off"></div>
+    <div class="field"><label>密码（≥4位）</label><input id="np" type="text" autocomplete="off"></div>
+    <div class="field"><label>角色</label><select id="nrole"><option value="user">普通用户</option><option value="superadmin">超级管理员</option></select></div>
+  </div>
+  <div class="btns"><button class="mbtn primary" id="addUser">➕ 添加用户</button></div>
+</div>
+
+<div class="section">
+  <div class="grp-title">用户列表</div>
+  <div class="tablewrap"><div id="usersBox"><div class="loading">加载中…</div></div></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const enc = encodeURIComponent;
+let ME = null;
+
+const api = (p, opt) => fetch('/api' + p, opt).then(async r => {
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 401) { location.replace('/login/'); throw new Error('登录已过期'); }
+  if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+  return j;
+});
+
+function toast(t, err) {
+  const el = $('#toast'); el.textContent = t; el.className = 'toast show' + (err ? ' err' : '');
+  setTimeout(() => { el.className = 'toast'; }, 2600);
+}
+function escapeHtml(s) { return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+function fmtLogin(ts) {
+  if (!ts) return '<span style="color:#7f8c8d">从未登录</span>';
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+async function boot() {
+  try {
+    const me = await fetch('/api/me').then(r => r.json());
+    if (!me || !me.user) { location.replace('/login/'); return; }
+    if (me.user.role !== 'superadmin') { location.replace('/admin/'); return; }
+    ME = me.user;
+    $('#who').textContent = ME.username;
+  } catch (e) { location.replace('/login/'); return; }
+  $('#logoutBtn').onclick = async () => { try { await fetch('/api/logout', { method: 'POST' }); } catch {} location.replace('/login/'); };
+  $('#novelsBtn').onclick = () => { location.href = '/admin/'; };
+  $('#addUser').onclick = addUser;
+  loadUsers();
+}
+
+async function loadUsers() {
+  try {
+    const r = await api('/admin/users');
+    const users = r.users || [];
+    $('#cUsers').textContent = users.length;
+    $('#cDisabled').textContent = users.filter(u => u.disabled).length;
+    $('#cNovels').textContent = users.reduce((a, u) => a + (u.novelCount || 0), 0);
+    const rows = users.map(u => {
+      const self = u.id === ME.id ? '<span class="self">（本人）</span>' : '';
+      const ops = u.id === ME.id
+        ? '<span style="color:#7f8c8d">—</span>'
+        : `<button class="pw" data-pw="${u.id}" data-name="${escapeHtml(u.username)}">重置密码</button> <button data-dis="${u.disabled ? 0 : 1}" data-id="${u.id}">${u.disabled ? '启用' : '禁用'}</button>`;
+      return `<tr>
+        <td class="u">${escapeHtml(u.username)}${self}</td>
+        <td>${u.role === 'superadmin' ? '超管' : '普通'}</td>
+        <td>${u.disabled ? '<span class="pill off">禁用</span>' : '<span class="pill on">启用</span>'}</td>
+        <td>${fmtLogin(u.lastLogin)}</td>
+        <td>${u.novelCount || 0}</td>
+        <td>${ops}</td>
+      </tr>`;
+    }).join('');
+    $('#usersBox').innerHTML = `<table class="utable"><thead><tr><th>用户名</th><th>角色</th><th>状态</th><th>上次登录</th><th>小说</th><th>操作</th></tr></thead><tbody>${rows || '<tr><td colspan="6">暂无用户</td></tr>'}</tbody></table>`;
+    $('#usersBox').querySelectorAll('button[data-id]').forEach(b => b.onclick = () => toggleUser(b.dataset.id, b.dataset.dis === '1'));
+    $('#usersBox').querySelectorAll('button[data-pw]').forEach(b => b.onclick = () => resetPw(b.dataset.pw, b.dataset.name));
+  } catch (e) { toast('加载失败：' + e.message, true); }
+}
+
+async function addUser() {
+  const username = $('#nu').value.trim(), password = $('#np').value, role = $('#nrole').value;
+  if (!username || !password) return toast('用户名与密码必填', true);
+  try {
+    await api('/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password, role }) });
+    $('#nu').value = ''; $('#np').value = ''; toast('✅ 用户已创建'); loadUsers();
+  } catch (e) { toast('❌ ' + e.message, true); }
+}
+
+async function resetPw(id, name) {
+  const pw = prompt(`为「${name}」设置新密码（至少 4 位）：`);
+  if (pw === null) return;
+  if (pw.length < 4) return toast('密码至少 4 位', true);
+  try { await api(`/admin/users/${enc(id)}/password`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pw }) }); toast('✅ 已重置密码'); }
+  catch (e) { toast('❌ ' + e.message, true); }
+}
+
+async function toggleUser(id, disabled) {
+  try { await api(`/admin/users/${enc(id)}/disable`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disabled }) }); toast(disabled ? '已禁用' : '已启用'); loadUsers(); }
+  catch (e) { toast('❌ ' + e.message, true); }
+}
+
+boot();
+</script>
+</body>
+</html>

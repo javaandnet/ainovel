@@ -542,32 +542,24 @@
       return document.body.innerText;
     }
 
-    /* 统一 AI 调用入口，返回 Promise<reply> */
-    function callAI(prompt, documentText) {
-      return fetch('http://localhost:3300/api/bridge/chat', {
+    /* 阅读器 AI：统一走服务端代理（密钥不外泄、同源可达、服务端缓存 + 限并发 + 限流） */
+    function apiPost(path, body) {
+      return fetch(path, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': 'abk_a8f25e83eb15893c234682ba8edcbb7792ec027b9ca91354e807d607c5e550e5'
-        },
-        body: JSON.stringify({
-          prompt: prompt,
-          document: documentText || '',
-          stream: false
-        })
-      })
-      .then(function (res) {
-        if (!res.ok) { throw new Error('HTTP ' + res.status + ': ' + res.statusText); }
-        return res.json();
-      })
-      .then(function (data) {
-        var reply = data.content || data.reply || data.response || data.message || data.text || data.result;
-        if (!reply && data.choices && data.choices[0]) {
-          reply = data.choices[0].message?.content || data.choices[0].text;
-        }
-        if (!reply) { throw new Error('无响应'); }
-        return reply;
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body || {})
+      }).then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (j) {
+          if (!res.ok) { throw new Error((j && j.error) || ('HTTP ' + res.status)); }
+          return j;
+        });
       });
+    }
+    /* 读取发布时内嵌的预生成数据（章节测试等） */
+    function preloadReaderData() {
+      var el = document.getElementById('novel-reader-data');
+      if (!el) return null;
+      try { return JSON.parse(el.textContent); } catch (e) { return null; }
     }
 
     /* 添加消息到聊天窗口 */
@@ -589,37 +581,12 @@
       aiSendBtn.textContent = '...';
 
       var chapterContent = getChapterContent();
-      fetch('http://localhost:3300/api/bridge/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': 'abk_a8f25e83eb15893c234682ba8edcbb7792ec027b9ca91354e807d607c5e550e5'
-        },
-        body: JSON.stringify({
-          prompt: question,
-          document: chapterContent,
-          stream: false
-        })
-      })
-      .then(function (res) {
-        if (!res.ok) {
-          throw new Error('HTTP ' + res.status + ': ' + res.statusText);
-        }
-        return res.json();
-      })
+      apiPost('/api/reader/ask', { question: question, document: chapterContent })
       .then(function (data) {
-        var reply = data.content || data.reply || data.response || data.message || data.text || data.result;
-        if (!reply && data.choices && data.choices[0]) {
-          reply = data.choices[0].message?.content || data.choices[0].text;
-        }
-        if (!reply) {
-          reply = '无响应 (响应格式：' + Object.keys(data).join(', ') + ')';
-        }
-        addMessage('ai', reply);
+        addMessage('ai', data.answer || '（无回答）');
       })
       .catch(function (err) {
-        console.error('AI Error:', err);
-        addMessage('ai', '错误：' + err.message + '\n\n请确认：\n1. AI Bridge 服务已启动 (localhost:3300)\n2. API Key 正确\n3. Provider 已配置');
+        addMessage('ai', '错误：' + err.message);
       })
       .finally(function () {
         aiSendBtn.disabled = false;
@@ -726,12 +693,8 @@
       explainBody.textContent = '加载中...';
       explainPanel.classList.add('open');
       toolbar.style.display = 'none';
-      var prompt = '你是一位耐心的语言老师。学生年龄：' + learnAge() + '岁。\n' +
-        '请用' + learnLang() + '解释下面句子中的关键词汇，并附简单中文对照。\n' +
-        '解释要生动有趣，适合' + learnAge() + '岁孩子理解。\n' +
-        '句子：' + sentenceText;
-      callAI(prompt, sentenceText)
-        .then(function (reply) { explainBody.textContent = reply; })
+      apiPost('/api/reader/explain', { sentence: sentenceText, age: learnAge(), lang: learnLang() })
+        .then(function (data) { explainBody.textContent = data.explanation || '（无讲解）'; })
         .catch(function (err) { explainBody.textContent = '讲解失败：' + err.message; });
     }
 
@@ -756,21 +719,21 @@
     }
 
     function startQuiz() {
-      quizBody.textContent = '正在出题...';
       quizPanel.classList.add('open');
       toolbar.style.display = 'none';
-      var prompt = '根据以下章节内容，为' + learnAge() + '岁孩子生成3道选择题。\n' +
-        '每题3个选项，只有1个正确答案。\n' +
-        '只返回JSON数组：[{"question":"","options":["","",""],"answer":""}]\n' +
-        '章节内容：' + getChapterContent();
-      callAI(prompt, getChapterContent())
-        .then(function (reply) {
-          var arr = parseQuizJSON(reply);
-          if (!arr || !arr.length) { quizBody.textContent = '出题失败：AI 返回格式异常'; return; }
-          quizQuestions = arr;
-          quizIndex = 0;
-          quizScore = 0;
-          renderQuizQuestion();
+      var age = learnAge();
+      var pre = preloadReaderData();
+      /* 发布时已按默认年龄预生成：命中即用，零 LLM、即时呈现 */
+      if (pre && pre.quiz && String(pre.quiz.age) === String(age) && Array.isArray(pre.quiz.questions) && pre.quiz.questions.length) {
+        quizQuestions = pre.quiz.questions; quizIndex = 0; quizScore = 0; renderQuizQuestion(); return;
+      }
+      /* 年龄不匹配或旧页面：走服务端（带缓存 + 在途去重），命中后同样即时 */
+      quizBody.textContent = '正在出题...';
+      apiPost('/api/reader/quiz', { document: getChapterContent(), age: age })
+        .then(function (data) {
+          var arr = data.questions;
+          if (!arr || !arr.length) { quizBody.textContent = '出题失败：未返回题目'; return; }
+          quizQuestions = arr; quizIndex = 0; quizScore = 0; renderQuizQuestion();
         })
         .catch(function (err) { quizBody.textContent = '出题失败：' + err.message; });
     }
@@ -823,10 +786,9 @@
       fb.className = 'quiz-feedback';
       fb.textContent = '思考中...';
       quizBody.appendChild(fb);
-      var prompt = '孩子选了' + selectedLetter + '，正确答案是' + letters[correctIdx] + '。\n' +
-        '请用鼓励语气简短解释，适合' + learnAge() + '岁孩子。';
-      callAI(prompt, q.question)
-        .then(function (reply) { fb.textContent = reply; })
+      var fbText = '题目：' + q.question + '\n孩子选了' + selectedLetter + '，正确答案是' + letters[correctIdx] + '。请用鼓励语气简短讲解。';
+      apiPost('/api/reader/feedback', { text: fbText })
+        .then(function (data) { fb.textContent = data.feedback || (isCorrect ? '回答正确！' : '正确答案是 ' + letters[correctIdx] + '。'); })
         .catch(function () { fb.textContent = isCorrect ? '回答正确！' : '正确答案是 ' + letters[correctIdx] + '。'; });
       /* 下一题按钮 */
       var next = document.createElement('button');
