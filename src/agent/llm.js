@@ -36,7 +36,7 @@ if (!AIBRIDGE_API_KEY) {
 }
 
 class LLM {
-  async chat({ messages = [], model = null, temperature, maxTokens, timeout } = {}) {
+  async chat({ messages = [], model = null, temperature, maxTokens, timeout, think } = {}) {
     const system = messages
       .filter((m) => m.role === 'system')
       .map((m) => (typeof m.content === 'string' ? m.content : JSON.stringify(m.content)))
@@ -55,6 +55,10 @@ class LLM {
     if (typeof temperature === 'number') body.temperature = temperature;
     if (maxTokens) body.max_tokens = maxTokens;
     if (model) body.model = model;
+    /* 结构化的提取/分类类小任务（如阅读模式挑生词）显式关思考：
+       自托管混合思考模型在这类任务上会写上千 token 思考链，1500 字章节要 109.7s，
+       关掉后 6.1s 且词表质量未降。不传则保持上游默认。 */
+    if (think === false) body.think = false;
 
     const res = await fetch(AIBRIDGE_URL, {
       method: 'POST',

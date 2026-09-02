@@ -1,21 +1,41 @@
 /* ===== 阅读模式（TTS）样式：悬浮工具栏 + 底部控制面板 + 逐句高亮 ===== */
 /* 由 reader.js 动态注入；更新本文件后立即对所有已发布页面生效，无需重新发布小说 */
 
-/* 悬浮工具栏（右下角圆形按钮组） */
+/* 悬浮工具栏（右下角）：收起态只占一个入口，展开时向上弹出动作项 */
 .reader-toolbar {
     position: fixed; right: 20px; bottom: 20px; z-index: 1000;
-    display: flex; flex-direction: column; gap: 12px;
+    display: flex; flex-direction: column; align-items: flex-end;
+    gap: 10px;
+}
+/* 动作项容器：收起即不占位也不可点，避免隐形按钮吃掉正文点击 */
+.toolbar-actions {
+    display: none; flex-direction: column; align-items: flex-end; gap: 10px;
+}
+.reader-toolbar.expanded .toolbar-actions {
+    display: flex; animation: dialIn 0.18s ease-out;
+}
+@keyframes dialIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 .toolbar-btn {
-    width: 52px; height: 52px; border-radius: 50%;
+    min-width: 52px; height: 52px; border-radius: 26px;
+    box-sizing: border-box;
     background: #3498db; color: #fff; border: none;
     font-size: 22px; cursor: pointer;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-    display: flex; align-items: center; justify-content: center;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 0 16px;
     transition: transform 0.15s, background 0.2s;
 }
 .toolbar-btn:hover { background: #2980b9; transform: scale(1.08); }
 .toolbar-btn:active { transform: scale(0.95); }
+/* 图标 + 文字：单独一个 emoji 不易认，展开态补上标签 */
+.tb-ico { font-size: 20px; line-height: 1; }
+.tb-txt { font-size: 14px; line-height: 1; white-space: nowrap; }
+/* 入口钮：展开后换成 ✕，明示再按一次即收起 */
+.toolbar-menu { font-size: 20px; }
+.reader-toolbar.expanded .toolbar-menu { background: #2980b9; }
 
 /* 保留旧类名兼容（tts-fab 现在指向工具栏内的朗读按钮） */
 .tts-fab {
@@ -96,6 +116,30 @@
 }
 .tts-icon-btn:hover { background: #46627f; }
 .tts-icon-btn.active { background: #3498db; color: #fff; border-color: #3498db; }
+
+/* 翻阅手势提示（左右滑动 / 方向键切章）：跟随滑动方向贴边显示，不拦截点击 */
+.swipe-hint {
+    position: fixed; top: 50%; z-index: 999; pointer-events: none;
+    background: rgba(44, 62, 80, 0.92); color: #ecf0f1;
+    padding: 10px 14px; border-radius: 8px;
+    font-size: 14px; line-height: 1; white-space: nowrap;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    animation: swipeHintIn 0.18s ease-out;
+}
+.swipe-hint.hint-left { left: 12px; transform: translateY(-50%); }
+.swipe-hint.hint-right { right: 12px; transform: translateY(-50%); }
+.swipe-hint.tip {
+    left: 50%; transform: translate(-50%, -50%);
+    color: #f39c12; background: rgba(44, 62, 80, 0.88);
+}
+@keyframes swipeHintIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .swipe-hint { animation: none; }
+    .reader-toolbar.expanded .toolbar-actions { animation: none; }
+}
 
 /* 章节悬浮面板 */
 .chapter-panel {
@@ -235,3 +279,13 @@
 .tts-sentence { border-radius: 3px; transition: background 0.2s, color 0.2s; cursor: pointer; }
 .tts-sentence.reading { background: #ffe9a8; box-shadow: 0 0 0 2px #ffe9a8; }
 .tts-sentence.read { color: #b3b3b3; }
+
+/* 生词标注（学习模式）：中文单靠字重不够醒目，再补一条虚线下划线 */
+.tts-word {
+    font-weight: 700;
+    border-bottom: 1px dashed rgba(52, 152, 219, 0.75);
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.tts-word:hover { background: rgba(52, 152, 219, 0.14); }

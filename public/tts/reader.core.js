@@ -6,11 +6,20 @@
  *
  * 能力：正文逐句切分 → speechSynthesis 逐句朗读 → 当前句高亮 + 自动滚动跟随
  *      → 读完本章自动跳下一章（?autoplay=1 自动开播）→ 语速/音色/连读偏好持久化
+ *      → 左右滑动（触屏）/ 方向键（桌面）翻阅上一章下一章
+ *      → 学习模式下按年龄挑生词并加粗标注，点词可直接查该词
  */
 (function () {
   'use strict';
 
   function boot() {
+    /* 加载器为避免原始导航闪烁，已用 html.reader-nav-defer 提前把它收起（见 reader.js）。
+       本文件已经跑起来了，接手方就在下面 1b（直接给 .chapter-nav 挂内联 display:none），
+       所以此处先撤掉临时收起：与 1b 处于同一同步任务，中间不会绘制，不会因此再闪一次；
+       而提前 return 的路径（不支持语音合成 / 无正文容器）本就不建面板，撤掉收起正好让
+       原始导航回来，不至于把翻章入口弄丢。 */
+    document.documentElement.classList.remove('reader-nav-defer');
+
     var content = document.querySelector('.content');
 
     /* ===== 0. 环境检测（不可用时明确告知，不静默隐藏按钮） ===== */
@@ -30,11 +39,14 @@
     var holder = document.createElement('div');
     holder.innerHTML = [
       '<div class="reader-toolbar" id="readerToolbar">',
-      '  <button class="toolbar-btn" id="chapterBtn" title="章节目录">📑</button>',
-      '  <button class="toolbar-btn" id="ttsFab" title="朗读">🎧</button>',
-      '  <button class="toolbar-btn" id="aiFab" title="AI 问答">🤖</button>',
-      '  <button class="toolbar-btn" id="quizFab" title="本章测试">📝</button>',
-      '  <button class="toolbar-btn" id="settingsFab" title="设置">⚙</button>',
+      '  <div class="toolbar-actions" id="toolbarActions">',
+      '    <button class="toolbar-btn" id="settingsFab" title="设置"><span class="tb-ico">⚙</span><span class="tb-txt">设置</span></button>',
+      '    <button class="toolbar-btn" id="quizFab" title="本章测试"><span class="tb-ico">📝</span><span class="tb-txt">测试</span></button>',
+      '    <button class="toolbar-btn" id="aiFab" title="AI 问答"><span class="tb-ico">🤖</span><span class="tb-txt">问答</span></button>',
+      '    <button class="toolbar-btn" id="chapterBtn" title="章节目录"><span class="tb-ico">📑</span><span class="tb-txt">目录</span></button>',
+      '    <button class="toolbar-btn" id="ttsFab" title="朗读"><span class="tb-ico">🎧</span><span class="tb-txt">朗读</span></button>',
+      '  </div>',
+      '  <button class="toolbar-btn toolbar-menu" id="toolbarMenu" title="工具" aria-expanded="false" aria-label="展开工具栏">☰</button>',
       '</div>',
       '<div class="tts-panel" id="ttsPanel">',
       '  <div class="tts-row">',
@@ -121,6 +133,8 @@
     var pick = function (id) { return holder.querySelector('#' + id); };
     var fab = pick('ttsFab');
     var chapterBtn = pick('chapterBtn');
+    var toolbar = pick('readerToolbar');
+    var toolbarMenu = pick('toolbarMenu');
     var panel = pick('ttsPanel');
     var playBtn = pick('ttsPlay');
     var restartBtn = pick('ttsRestart');
@@ -163,6 +177,36 @@
     if (inlineNavs.length > 0) {
       chapterNavLinks.innerHTML = inlineNavs[0].innerHTML;
     }
+
+    /* ===== 1c. 工具栏二级展开：收起态只留一个入口，点开才向上弹出动作项 ===== */
+    /* 五个按钮常驻会竖排占掉近 300px，正好压住正文；而一次阅读里真正会用到的
+       往往只有一两项，多按一次入口换回正文空间是划算的。
+       朗读为最高频动作，排在与入口相邻的一格（拇指行程最短）。
+       本段紧接面板构建就做，不放至后面的开合逻辑里：正文无可读句子时后面会提前
+       return，那样会让 ☰ 绑不上点击，工具栏就彻底点不开了。 */
+    function collapseToolbar() {
+      toolbar.classList.remove('expanded');
+      toolbarMenu.textContent = '☰';
+      toolbarMenu.setAttribute('aria-expanded', 'false');
+    }
+    function expandToolbar() {
+      toolbar.classList.add('expanded');
+      toolbarMenu.textContent = '✕';
+      toolbarMenu.setAttribute('aria-expanded', 'true');
+    }
+    toolbarMenu.addEventListener('click', function () {
+      if (toolbar.classList.contains('expanded')) { collapseToolbar(); }
+      else { expandToolbar(); }
+    });
+    /* 入口以外任意位置点击即收起。必须是冒泡阶段的 click，不能是按下（pointerdown/mousedown）：
+       按下时就收起会让动作按钮 display:none，松开时该元素已不在渲染树里，
+       浏览器改按「按下目标与松开目标的最近共同祖先」派发 click，落在 html 上 ——
+       按钮自己的 click 根本不会执行，点一下只剩收起，什么面板也不弹。 */
+    document.addEventListener('click', function (e) {
+      if (!toolbar.classList.contains('expanded')) { return; }
+      if (e.target === toolbarMenu || toolbarMenu.contains(e.target)) { return; } /* 入口的开合由它自己的 click 管 */
+      collapseToolbar();
+    });
 
     /* ===== 2. 正文逐句切分（按中文标点，pre/code 内跳过） ===== */
     var endPuncts = '。！？…；';
@@ -302,13 +346,15 @@
       if (playing) { playBtn.textContent = paused ? '▶ 继续' : '⏸ 暂停'; }
       else { playBtn.textContent = '▶ 播放'; }
     }
-    function findNextUrl() {
+    /* 按导航文案定位章节链接（发布端 buildChapterNav 产出「← 上一章 / 📖 目录 / 下一章 →」） */
+    function findNavLink(word) {
       var links = document.querySelectorAll('.chapter-nav a');
       for (var i = 0; i < links.length; i++) {
-        if (links[i].textContent.indexOf('下一章') >= 0) { return links[i].href; }
+        if (links[i].textContent.indexOf(word) >= 0) { return links[i].href; }
       }
       return null;
     }
+    function findNextUrl() { return findNavLink('下一章'); }
     function onChapterEnd() {
       playing = false;
       paused = false;
@@ -439,14 +485,20 @@
       return t;
     }
     content.addEventListener('dblclick', function (e) {
+      /* 加粗词已由单击负责讲解，不再叠加一次整句讲解 */
+      if (e.target && e.target.closest && e.target.closest('.tts-word')) { return; }
       var t = findSentence(e.target);
       if (t) { triggerSentence(t); }
     });
     var longPressTimer = null;
+    /* 长按已按整句讲解，随后浏览器补发的 click 不该再走一次点词查询 */
+    var longPressFired = false;
     content.addEventListener('touchstart', function (e) {
+      longPressFired = false;
       var t = findSentence(e.target);
       if (!t) { return; }
       longPressTimer = setTimeout(function () {
+        longPressFired = true;
         triggerSentence(t);
       }, 500);
     }, { passive: true });
@@ -457,6 +509,107 @@
     function triggerSentence(t) {
       if (isLearnMode()) { explainSentence(t.textContent); }
       else { speakSentence(sentences.indexOf(t)); }
+    }
+
+    /* ===== 4b. 翻阅手势：左右滑动切章（触屏）+ 方向键切章（桌面） ===== */
+    /* 语义与纸书一致：手指向左移 → 下一章，向右移 → 上一章。同一手势在桌面端
+       由 ← / → 承担。
+       为避免和正文纵向滚动、长按朗读、系统边缘返回手势抢焦点，判定刻意保守：
+       起手先比位移方向，水平主导（|dx| ≥ |dy|×1.6）才认领该手势，之后一路只做
+       提示不做拦截（监听全程 passive，滚动不被打断）；松手时还要位移达标
+       （≥56px）且是一次快划（≤900ms）才真的翻页，慢拖/短划一律取消。
+       无上一章/下一章链接的页面（如目录页）整段不启用。 */
+    var SWIPE_MIN_X = 56;
+    var SWIPE_RATIO = 1.6;
+    var SWIPE_MAX_MS = 900;
+    var navTargets = { prev: findNavLink('上一章'), next: findNavLink('下一章') };
+    var swipeHint = document.createElement('div');
+    swipeHint.className = 'swipe-hint';
+    swipeHint.style.display = 'none';
+    document.body.appendChild(swipeHint);
+    var hintTimer = null;
+
+    /* dir 为 'next'/'prev' 时显示方向提示；不可翻的方向不提示（松手会给出到位反馈） */
+    function setSwipeHint(dir) {
+      clearTimeout(hintTimer);
+      if (!dir || !navTargets[dir]) { swipeHint.style.display = 'none'; return; }
+      swipeHint.className = 'swipe-hint ' + (dir === 'next' ? 'hint-right' : 'hint-left');
+      swipeHint.textContent = dir === 'next' ? '下一章 →' : '← 上一章';
+      swipeHint.style.display = '';
+    }
+    /* 已达首/末章、标注进展这类瞬时说明：复用提示元素，ms 过后自动收起；ms=0 则常驻至下次调用 */
+    function flashTip(msg, ms) {
+      clearTimeout(hintTimer);
+      swipeHint.className = 'swipe-hint tip';
+      swipeHint.textContent = msg;
+      swipeHint.style.display = '';
+      var hold = ms === undefined ? 1200 : ms;
+      if (hold > 0) { hintTimer = setTimeout(function () { swipeHint.style.display = 'none'; }, hold); }
+    }
+    function goChapter(url) {
+      if (!url) { return; }
+      /* 翻章前收尾朗读：离开本页后语音合成与屏幕常亮都不该继续占用 */
+      synth.cancel();
+      playing = false;
+      paused = false;
+      releaseWakeLock();
+      updatePlayBtn();
+      location.href = url;
+    }
+    /* 控件区与可点元素内的触摸交给原交互，不起算翻页手势 */
+    function gestureBlocked(target) {
+      return !!(target && target.closest && target.closest(
+        '.reader-toolbar, .tts-panel, .chapter-panel, .ai-panel, .settings-panel, .explain-panel, .quiz-panel, a, button, input, select, textarea'
+      ));
+    }
+
+    if (navTargets.prev || navTargets.next) {
+      /* axis: '' 未判定 / 'h' 水平翻页 / 'v' 判定为滚动，本手势作废 */
+      var touch0 = null;
+
+      document.addEventListener('touchstart', function (e) {
+        setSwipeHint('');
+        var t = e.touches[0];
+        /* 左缘 24px 内起手属于系统返回手势区，不接管 */
+        if (e.touches.length !== 1 || gestureBlocked(e.target) || t.clientX <= 24) { touch0 = null; return; }
+        touch0 = { x: t.clientX, y: t.clientY, t: Date.now(), axis: '' };
+      }, { passive: true });
+
+      document.addEventListener('touchmove', function (e) {
+        if (!touch0) { return; }
+        var t = e.touches[0];
+        var dx = t.clientX - touch0.x;
+        var dy = t.clientY - touch0.y;
+        if (!touch0.axis) {
+          if (Math.abs(dx) < 12 && Math.abs(dy) < 12) { return; } /* 位移太小还判不出方向 */
+          touch0.axis = Math.abs(dx) >= Math.abs(dy) * SWIPE_RATIO ? 'h' : 'v';
+        }
+        if (touch0.axis !== 'h') { touch0 = null; return; }
+        setSwipeHint(dx < 0 ? 'next' : 'prev');
+      }, { passive: true });
+
+      document.addEventListener('touchend', function (e) {
+        if (!touch0) { return; }
+        var t = e.changedTouches[0];
+        var dx = t ? t.clientX - touch0.x : 0;
+        var swiped = touch0.axis === 'h' && Date.now() - touch0.t <= SWIPE_MAX_MS && Math.abs(dx) >= SWIPE_MIN_X;
+        var dir = dx < 0 ? 'next' : 'prev';
+        touch0 = null;
+        setSwipeHint('');
+        if (!swiped) { return; }
+        if (navTargets[dir]) { goChapter(navTargets[dir]); }
+        else { flashTip(dir === 'next' ? '已是最后一章' : '已是第一章'); }
+      }, { passive: true });
+
+      document.addEventListener('touchcancel', function () { touch0 = null; setSwipeHint(''); }, { passive: true });
+
+      document.addEventListener('keydown', function (e) {
+        if (e.metaKey || e.ctrlKey || e.altKey) { return; }
+        var tag = e.target && e.target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') { return; } /* 输入时方向键归光标 */
+        if (e.key === 'ArrowLeft') { goChapter(navTargets.prev); }
+        else if (e.key === 'ArrowRight') { goChapter(navTargets.next); }
+      });
     }
 
     /* ===== 5. 音色与偏好（localStorage 持久化） ===== */
@@ -509,10 +662,10 @@
     });
 
     /* ===== 6. 面板开合与连读自动开播 ===== */
-        function openPanel() { panel.classList.add('open'); fab.style.display = 'none'; }
-    function closePanel() { fab.style.display = ''; panel.classList.remove('open'); }
+    /* 面板弹起时整个工具栏隐藏（底部面板本就占住右下角），由各面板的 ✕ 负责还原 */
+    function openPanel() { panel.classList.add('open'); toolbar.style.display = 'none'; }
+    function closePanel() { panel.classList.remove('open'); toolbar.style.display = ''; collapseToolbar(); }
     fab.addEventListener('click', openPanel);
-    var toolbar = document.getElementById('readerToolbar');
     chapterBtn.addEventListener('click', function () {
       var isOpen = chapterPanel.classList.toggle('open');
       toolbar.style.display = isOpen ? 'none' : '';
@@ -680,9 +833,15 @@
     learnModeBtn.addEventListener('click', function () {
       setLearnSetting('learnMode', isLearnMode() ? '0' : '1');
       refreshLearnModeBtn();
+      /* 标注跟着模式走：开列拉词表上粗体，关则恢复纯文本，不留无意义的标记 */
+      if (isLearnMode()) { applyVocab(); } else { clearWordMarks(); }
     });
+    /* 讲解语言只影响讲解文本的语种，词表只跟年龄有关，切语言不必重标 */
     learnLangSel.addEventListener('change', function () { setLearnSetting('learnLang', learnLangSel.value); });
-    learnAgeSel.addEventListener('change', function () { setLearnSetting('learnAge', learnAgeSel.value); });
+    learnAgeSel.addEventListener('change', function () {
+      setLearnSetting('learnAge', learnAgeSel.value);
+      if (isLearnMode()) { applyVocab(); }
+    });
 
     /* 词汇讲解 */
     explainPanelClose.addEventListener('click', function () {
@@ -697,6 +856,106 @@
         .then(function (data) { explainBody.textContent = data.explanation || '（无讲解）'; })
         .catch(function (err) { explainBody.textContent = '讲解失败：' + err.message; });
     }
+
+    /* ===== 8b. 生词标注：学习模式下把值得积累的词语加粗，读者一眼能认出可学的词 ===== */
+    /* 哪些词“可学”取决于读者年龄，本地判不出来，只能由服务端按 (章节, 年龄) 挑取并缓存。
+       标注只在 .tts-sentence 内部插 <b>，句子的 textContent 一字不变，
+       因此逐句切分、进度跳转、朗读高亮均不受影响。 */
+    var vocabCache = {};      /* age -> words，同一章内切年龄不重复回源 */
+    var vocabApplied = null;  /* 当前涂到正文上的口径，用于丢弃迟到的旧响应 */
+
+    /* 长词先占位：同一句里「红宝石」占了位，「宝石」就不能再切进去；返回实际标了多少处 */
+    function markWords(words) {
+      var marked = 0;
+      var list = (words || []).slice().sort(function (a, b) { return b.length - a.length; });
+      sentences.forEach(function (span) {
+        var text = span.textContent;
+        var taken = [];
+        var hits = [];
+        for (var w = 0; w < list.length; w++) {
+          var word = list[w];
+          if (!word) { continue; }
+          var idx = text.indexOf(word);
+          while (idx >= 0) {
+            var clash = false;
+            for (var p = idx; p < idx + word.length; p++) { if (taken[p]) { clash = true; break; } }
+            if (!clash) {
+              for (var q = idx; q < idx + word.length; q++) { taken[q] = true; }
+              hits.push({ start: idx, end: idx + word.length });
+            }
+            idx = text.indexOf(word, idx + 1);
+          }
+        }
+        /* 本句无命中：若上一轮词表在这里标过，也要收拢回纯文本，不能残留旧粗体 */
+        if (!hits.length) {
+          if (span.querySelector('.tts-word')) { span.textContent = text; }
+          return;
+        }
+        hits.sort(function (a, b) { return a.start - b.start; });
+        marked += hits.length;
+        var frag = document.createDocumentFragment();
+        var cursor = 0;
+        for (var i = 0; i < hits.length; i++) {
+          if (hits[i].start > cursor) { frag.appendChild(document.createTextNode(text.slice(cursor, hits[i].start))); }
+          var b = document.createElement('b');
+          b.className = 'tts-word';
+          b.textContent = text.slice(hits[i].start, hits[i].end);
+          frag.appendChild(b);
+          cursor = hits[i].end;
+        }
+        if (cursor < text.length) { frag.appendChild(document.createTextNode(text.slice(cursor))); }
+        span.textContent = '';
+        span.appendChild(frag);
+      });
+      return marked;
+    }
+    function clearWordMarks() {
+      vocabApplied = null;
+      sentences.forEach(function (span) {
+        if (span.querySelector('.tts-word')) { span.textContent = span.textContent; }
+      });
+    }
+    /* 标注结果必须说得清：空词表、取到词但没匹配上、请求失败，四件事不能糊成“没反应”。
+       instant=true 时粗体本身就是反馈，不再占居中气泡（开页就弹一条反而看着像出错） */
+    function reportVocab(words, marked, instant) {
+      if (marked > 0) { if (!instant) { flashTip('已标注 ' + marked + ' 处生词', 1800); } return; }
+      if (!words.length) { flashTip('本章未挑出可标注的生词（候选均不在原文）', 5000); return; }
+      flashTip('生词表已取到，但正文未匹配到', 5000);
+    }
+    function applyVocab() {
+      var age = learnAge();
+      vocabApplied = age;
+      /* 发布时已按默认年龄预生成并内嵌：直接用，零请求、开页即已标好 */
+      var pre = preloadReaderData();
+      if (pre && pre.vocab && String(pre.vocab.age) === String(age) && Array.isArray(pre.vocab.words)) {
+        vocabCache[age] = pre.vocab.words;
+        reportVocab(pre.vocab.words, markWords(pre.vocab.words), true);
+        return;
+      }
+      /* 本次会话里已经回源过同一年龄（切走又切回）：也不必再请求 */
+      if (vocabCache[age]) { reportVocab(vocabCache[age], markWords(vocabCache[age]), true); return; }
+      /* 回源要几秒到几十秒（看服务端缓存命不命中、推理服务器忙不忙），进展提示得常驻到请求回来，
+         不然提示 1.2s 就消失，读者只会觉得“点了没反应” */
+      flashTip('正在标注生词…', 0);
+      apiPost('/api/reader/vocab', { document: getChapterContent(), age: age })
+        .then(function (data) {
+          var words = Array.isArray(data.words) ? data.words : [];
+          vocabCache[age] = words;
+          /* 迟到响应守卫：口径已变（切了年龄）或已退出学习模式，就不往正文上涂了 */
+          if (vocabApplied !== age || !isLearnMode()) { setSwipeHint(''); return; }
+          reportVocab(words, markWords(words));
+        })
+        .catch(function (err) { flashTip('生词标注失败：' + err.message, 6000); });
+    }
+
+    /* 点加粗词即查该词（带原句上下文），比整句讲解更聚焦 */
+    content.addEventListener('click', function (e) {
+      if (!isLearnMode() || longPressFired) { return; }
+      var w = e.target && e.target.closest ? e.target.closest('.tts-word') : null;
+      if (!w || !content.contains(w)) { return; }
+      var owner = w.closest('.tts-sentence');
+      explainSentence('词语：' + w.textContent + '\n原句：' + (owner ? owner.textContent : w.textContent));
+    });
 
     /* 章节测试 */
     quizPanelClose.addEventListener('click', function () {
@@ -820,6 +1079,8 @@
 
     quizFab.addEventListener('click', startQuiz);
     refreshLearnModeBtn();
+    /* 学习模式本就是开启状态（偏好持久化）：进页即标注，不必等读者去设置里重开一次 */
+    if (isLearnMode()) { applyVocab(); }
 
     updateProgress();
     var autoplay = '';

@@ -1936,12 +1936,28 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 // ainovel 本地发布：复用上方章节页生成逻辑，直接写文件到 public/novel/
 // 取代原 SSH 上传（方案 C：ainovel 本地服务直连，手机浏览器直接访问）
 // ─────────────────────────────────────────────────────────────
-/** 在章节页注入阅读器数据（如预生成的测试题），置于 reader.js 之前；转义 < 防止 </script> 截断 */
+/**
+ * 在章节页注入阅读器数据（如预生成的测试题、生词表），置于 reader.js 之前；转义 < 防止 </script> 截断。
+ * 已有标签时合并写入而不是再插一个：同一页出现两个 id="novel-reader-data" 时
+ * getElementById 只返回第一个，后注入的那份会被静默丢掉（测试题与生词表只能生效一个）。
+ */
 function injectReaderData(html, data) {
+  const RE = /<script id="novel-reader-data" type="application\/json">([\s\S]*?)<\/script>/;
+  const prev = html.match(RE);
+  if (prev) {
+    try {
+      // 存进去的 \u003c 是合法 JSON 转义，JSON.parse 会自己还原，不必手工替换
+      data = { ...JSON.parse(prev[1]), ...data };
+    } catch { /* 旧标签解析不了就用本次结果整体覆盖，不阻断发布 */ }
+  }
   const json = JSON.stringify(data).replace(/</g, '\\u003c');
   const tag = `<script id="novel-reader-data" type="application/json">${json}</script>`;
   const marker = '<script src="/tts/reader.js"></script>';
-  return html.includes(marker) ? html.replace(marker, tag + marker) : html.replace('</body>', tag + '</body>');
+  /* 三处替换一律用函数形式返回替换值：题干或词表里出现 $& / $' / $1 这类序列时，
+     字符串形式的替换值会把它们当成替换模式展开，内嵌 JSON 当场被撑坏（且无人发现） */
+  if (prev) return html.replace(RE, () => tag);
+  if (html.includes(marker)) return html.replace(marker, () => tag + marker);
+  return html.replace('</body>', () => tag + '</body>');
 }
 
 /**
@@ -2034,6 +2050,16 @@ export async function publishNovelLocal(dbPath, outRoot, options = {}) {
           htmlContent = injectReaderData(htmlContent, { quiz: { age: options.quizAge || 9, questions } });
         }
       } catch { /* 预生成失败：跳过内嵌 */ }
+    }
+    // 同理预生成生词表：学习模式下读者一打开正文就已标好，不必等回源
+    // 内嵌不依赖缓存键口径一致（词表跟着页面走，对不上前端自己会回源），所以用原文文本直接推词即可
+    if (page.kind === 'chapter' && typeof options.pickVocab === 'function') {
+      try {
+        const words = await options.pickVocab(page.chapterText || page.markdown, options.vocabAge || 9);
+        if (Array.isArray(words) && words.length) {
+          htmlContent = injectReaderData(htmlContent, { vocab: { age: options.vocabAge || 9, words } });
+        }
+      } catch { /* 预生成失败：跳过内嵌，读者端按需生成 */ }
     }
     const localPath = path.join(targetDir, page.filename);
     fs.writeFileSync(localPath, htmlContent, 'utf-8');

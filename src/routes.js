@@ -19,7 +19,7 @@ import { MENU_ACTIONS, AI_TOOLS } from './tools/registry.js';
 import { publishNovelLocal, publishSiteIndexLocal, sanitizeDirName } from './skills/novelPublisher/publish.js';
 import * as store from './auth/userStore.js';
 import { requireAuth, requireSuperadmin, currentUser, setSessionCookie, clearSessionCookie } from './auth/session.js';
-import { generateQuiz, explainSentence, askQuestion, answerFeedback } from './reader/aiService.js';
+import { generateQuiz, explainSentence, askQuestion, answerFeedback, pickVocab } from './reader/aiService.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -163,6 +163,11 @@ export function registerRoutes(app) {
   });
   app.post('/api/reader/explain', readerRateLimit, async (req, res) => {
     try { res.json({ ok: true, explanation: await explainSentence(req.body?.sentence, Number(req.body?.age) || 9, String(req.body?.lang || '英语')) }); }
+    catch (e) { readerErr(res, e); }
+  });
+  /* 生词标注：按 (章节+年龄) 缓存，学习模式开启时拉一次，命中后即时返回 */
+  app.post('/api/reader/vocab', readerRateLimit, async (req, res) => {
+    try { res.json({ ok: true, words: await pickVocab(req.body?.document, Number(req.body?.age) || 9) }); }
     catch (e) { readerErr(res, e); }
   });
   app.post('/api/reader/ask', readerRateLimit, async (req, res) => {
@@ -396,6 +401,8 @@ export function registerRoutes(app) {
     const userOut = path.join(OUT_ROOT, req.user.id);
     const urlBase = '/novel/' + encodeURIComponent(req.user.id);
     try {
+      // premakeQuiz 是“发布时跑不跑 LLM 预生成”的总开关，现在同时管测试题与生词表：
+      // 调用方传 false 意味着不想让发布变慢，不该只跳过测试题而偷偷多跑三十次挑词
       const premake = req.body?.premakeQuiz !== false;
       const quizAge = Number(req.body?.quizAge) || 9;
       const out = await publishNovelLocal(rr.absPath, userOut, {
@@ -403,6 +410,8 @@ export function registerRoutes(app) {
         urlBase,
         generateQuiz: premake ? ((text, age) => generateQuiz(text, age)) : null,
         quizAge,
+        pickVocab: premake ? ((text, age) => pickVocab(text, age)) : null,
+        vocabAge: quizAge,
       });
       // 该用户的站点首页（列出其已发布作品）
       try {
@@ -502,7 +511,7 @@ async function runAiTool(user, name, args) {
     case 'generateOutlines': return await run('generateChapterOutlines', { totalChapters: Number(args.totalChapters || 10) });
     case 'publishNovel': {
       const userOut = path.join(OUT_ROOT, user.id);
-      return await publishNovelLocal(rr.absPath, userOut, { urlBase: '/novel/' + encodeURIComponent(user.id), generateQuiz: (text, age) => generateQuiz(text, age) });
+      return await publishNovelLocal(rr.absPath, userOut, { urlBase: '/novel/' + encodeURIComponent(user.id), generateQuiz: (text, age) => generateQuiz(text, age), pickVocab: (text, age) => pickVocab(text, age) });
     }
     case 'checkConsistency': {
       const tool = makeTool();
