@@ -19,7 +19,7 @@ import { MENU_ACTIONS, AI_TOOLS } from './tools/registry.js';
 import { publishNovelLocal, publishSiteIndexLocal, sanitizeDirName } from './skills/novelPublisher/publish.js';
 import * as store from './auth/userStore.js';
 import { requireAuth, requireSuperadmin, currentUser, setSessionCookie, clearSessionCookie } from './auth/session.js';
-import { generateQuiz, explainSentence, askQuestion, answerFeedback, pickVocab } from './reader/aiService.js';
+import { generateQuiz, explainSentence, explainWord, vocabExplainStatus, askQuestion, answerFeedback, pickVocab } from './reader/aiService.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -158,7 +158,8 @@ export function registerRoutes(app) {
   }
   const readerErr = (res, e) => res.status(e && e.status === 503 ? 503 : 500).json({ error: (e && e.message) || 'AI 服务异常' });
   app.post('/api/reader/quiz', readerRateLimit, async (req, res) => {
-    try { res.json({ ok: true, questions: await generateQuiz(req.body?.document, Number(req.body?.age) || 9) }); }
+    /* force 显式白名单取值（不摊平 req.body）：只有读者点「换一组新题」才为 true */
+    try { res.json({ ok: true, questions: await generateQuiz(req.body?.document, Number(req.body?.age) || 9, { force: req.body?.force === true }) }); }
     catch (e) { readerErr(res, e); }
   });
   app.post('/api/reader/explain', readerRateLimit, async (req, res) => {
@@ -168,6 +169,16 @@ export function registerRoutes(app) {
   /* 生词标注：按 (章节+年龄) 缓存，学习模式开启时拉一次，命中后即时返回 */
   app.post('/api/reader/vocab', readerRateLimit, async (req, res) => {
     try { res.json({ ok: true, words: await pickVocab(req.body?.document, Number(req.body?.age) || 9) }); }
+    catch (e) { readerErr(res, e); }
+  });
+  /* 单词讲解：按 (词+年龄+语言) 持久缓存，命中即秒显；context（原句/章节）仅首次生成时作语境，不进键 */
+  app.post('/api/reader/explain-word', readerRateLimit, async (req, res) => {
+    try { res.json({ ok: true, explanation: await explainWord(req.body?.word, Number(req.body?.age) || 9, String(req.body?.lang || '英语'), req.body?.context) }); }
+    catch (e) { readerErr(res, e); }
+  });
+  /* 词义状态：告诉前端这批词哪些已生成（黑体）、哪些未生成（灰体）；纯查库、零 LLM */
+  app.post('/api/reader/word-status', readerRateLimit, async (req, res) => {
+    try { res.json({ ok: true, have: vocabExplainStatus(req.body?.words, Number(req.body?.age) || 9, String(req.body?.lang || '英语')) }); }
     catch (e) { readerErr(res, e); }
   });
   app.post('/api/reader/ask', readerRateLimit, async (req, res) => {
@@ -426,6 +437,19 @@ export function registerRoutes(app) {
       } catch { /* 首页失败不影响单本发布 */ }
       res.json({ success: true, ...out });
     } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── 阅读入口：/novel/ 必须落到「当前登录用户的作品站」──
+  // 不能靠静态目录的默认 index：public/novel/index.html 是多用户改造前的遗留物，
+  // 它只链向顶层旧版书页（无内嵌 quiz/vocab），会让每个人从首页进来都踩在旧页面上。
+  // 路由注册在 express.static 之前（server.js 先 registerRoutes 再挂静态），故能截下 /novel/。
+  app.get(['/novel', '/novel/'], (req, res) => {
+    const user = currentUser(req);
+    if (!user) return res.redirect('/login/?next=' + encodeURIComponent('/novel/'));
+    const site = path.join(OUT_ROOT, user.id, 'index.html');
+    // 该用户还没发布过作品：送去管理页，而不是给一个 404
+    if (!fs.existsSync(site)) return res.redirect('/admin/');
+    res.redirect('/novel/' + encodeURIComponent(user.id) + '/index.html');
   });
 
   // ── 分享：实时计算已发布阅读地址（不存库，避免改名后 404 陈旧链接）──

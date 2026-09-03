@@ -21,6 +21,8 @@
 import crypto from 'crypto';
 import { llm } from '../agent/llm.js';
 import { getCachedWords, putCachedWords } from './vocabStore.js';
+import { getExplanation, putExplanation, wordsWithExplanation } from './explainStore.js';
+import { getQuiz, putQuiz, deleteQuiz } from './quizStore.js';
 
 const MAX_CONC = Number(process.env.READER_LLM_CONC || 2);
 const MAX_QUEUE = Number(process.env.READER_LLM_QUEUE || 50);
@@ -86,24 +88,67 @@ export function parseQuizArray(text) {
   try { return JSON.parse(body); } catch { return null; }
 }
 
-function quizPrompt(document, age) {
-  return `根据以下章节内容，为${age}岁孩子生成3道选择题。\n每题3个选项，只有1个正确答案。\n只返回JSON数组：[{"question":"","options":["","",""],"answer":""}]\n章节内容：${document}`;
+/* 重新出题时随机挑一个命题角度：没有角度约束的话，同一 prompt 重跑大概率得到同一套题，
+   读者点了「换一组新题」却拿到换汤不换药的卷子，等于白付一次生成 */
+const QUIZ_FOCI = ['故事情节与细节', '人物动机与性格', '因果推理（为什么会出现这个结果）', '关键词语在句中的含义', '这一段想说明的道理'];
+
+function quizPrompt(document, age, focus) {
+  const angle = focus ? `\n出题侧重：${focus}（请从这个角度命题，不要泛泛而谈）` : '';
+  return `根据以下章节内容，为${age}岁孩子生成3道选择题。${angle}\n每题3个选项，只有1个正确答案。\n只返回JSON数组：[{"question":"","options":["","",""],"answer":""}]\n章节内容：${document}`;
+}
+/**
+ * 讲解口径按“目标语言”自适应。本书籍正文以中文为主，被解释的词往往本身就是中文，
+ * 所以不能无脑要求“附中文对照”（那会变成用中文解释中文）。
+ *  - lang=中文：讲解语言与原文同语种 → 只要大白话释义，明确禁止“中文对照”这类多余段落；
+ *  - lang=日语/英语/韩语：用该语言解释中文词（面向学外语的读者），并给出地道表达；
+ *  - 只有当被解释的词本身是外语时，附中文对照才有意义 → 交给模型按词判断。
+ */
+function glossRules(lang, age) {
+  if (lang === '中文') {
+    return `这些词是中文词，请用适合${age}岁孩子的简短大白话说清意思（可以说近义词、打个比方）。`
+      + '不要用其他语言，也不要输出「中文对照」这类多余段落。';
+  }
+  const tone = lang === '日语' ? `自然、口语化的日语（适合${age}岁学习者理解）` : `适合${age}岁孩子理解的${lang}`;
+  return `被解释的词语出自中文小说，请用${tone}解释它的意思；解释词语而不是逐字对译。`
+    + '只有当被解释的词本身是外语时，才在末尾附一句中文对照。';
 }
 function explainPrompt(sentence, age, lang) {
-  return `你是一位耐心的语言老师。学生年龄：${age}岁。\n请用${lang}解释下面句子中的关键词汇，并附简单中文对照。\n解释要生动有趣、简短（挑 2-3 个关键词，每个一句话，不要表格、不要复述全句），适合${age}岁孩子理解。\n句子：${sentence}`;
+  return `你是一位耐心的语言老师。学生年龄：${age}岁。\n${glossRules(lang, age)}\n就下面这句话里 2-3 个关键词各给一句话解释（不要表格、不要复述全句）。\n句子：${sentence}`;
+}
+function wordPrompt(word, age, lang, context) {
+  const ctx = context ? `\n这个词出现的句子（仅供理解语境，不必复述、不必逐字翻译整句）：${String(context).slice(0, 160)}` : '';
+  return `你是一位耐心的语言老师。学生年龄：${age}岁。\n${glossRules(lang, age)}\n要解释的词语：「${word}」。\n只要一两句话，生动、简短（不要表格、不要长篇、不要复述整句）。${ctx}`;
 }
 function vocabPrompt(document, age) {
   return `你是一位语文老师。请从下面的课文中挑出值得${age}岁学生重点积累的词语。\n要求：\n1. 只能是课文里原文出现过的词，一字不差，不要改写、不要造词、不要带标点\n2. 挑成语、书面语、生僻词和对${age}岁偏难的词；常用代词、连词、语气词不要挑\n3. 去重后返回 8-20 个\n只返回 JSON 数组：["词语1","词语2"]\n课文：${document}`;
 }
 
 /** 章节测试：返回题目数组（可能为空数组） */
-export async function generateQuiz(document, age = 9) {
+/**
+ * 章节出题：按 (年龄档, 正文哈希) 持久缓存，命中即零 LLM。
+ *
+ * 只有 opts.force（读者主动点「换一组新题」）才允许绕开缓存重跑。平时绝不悄悄换题：
+ * 孩子刚答完的卷子一刷新就换了内容，是体验事故，不是缓存该优化的东西。
+ * force 时同时绕开进程内 Map（cacheResult:false），否则会被 Map 里的旧答案直接端回来。
+ */
+export async function generateQuiz(document, age = 9, opts = {}) {
   const doc = String(document || '').trim();
   if (!doc) throw new Error('缺少章节内容');
-  const key = sha1('quiz|' + age + '|' + doc);
-  const raw = await cachedGenerate(key, [{ role: 'user', content: quizPrompt(doc, age) }], { temperature: 0.5, think: false });
+  const a = Number(age) || 9;
+  const key = sha1('quiz|' + a + '|' + doc);
+  const force = opts.force === true;
+  if (!force) {
+    const persisted = getQuiz(key);
+    if (persisted) return persisted;
+  } else {
+    deleteQuiz(key);   // 先作废旧行：重跑万一失败，留下的是“无缓存”而不是新旧混用
+  }
+  const focus = force ? QUIZ_FOCI[Math.floor(Math.random() * QUIZ_FOCI.length)] : '';
+  const raw = await cachedGenerate(key, [{ role: 'user', content: quizPrompt(doc, a, focus) }], { temperature: 0.5, think: false, cacheResult: !force });
   const arr = parseQuizArray(raw);
-  return Array.isArray(arr) ? arr : [];
+  const questions = Array.isArray(arr) ? arr : [];
+  if (questions.length) putQuiz(key, a, questions, doc.length);
+  return questions;
 }
 
 /** 句子词汇讲解：返回讲解文本 */
@@ -112,6 +157,31 @@ export async function explainSentence(sentence, age = 9, lang = '英语') {
   if (!s) throw new Error('缺少句子内容');
   const key = sha1('explain|' + age + '|' + lang + '|' + s);
   return cachedGenerate(key, [{ role: 'user', content: explainPrompt(s, age, lang) }], { temperature: 0.6, think: false });
+}
+
+/**
+ * 单词讲解：按 (词, 年龄, 语言) 持久缓存，命中即零 LLM 秒显，且同词跨章节/跨书复用。
+ * 原句只作“首次生成”时的语境（context），不进缓存键，否则同词跨句无法复用、落库失去意义。
+ * 走关思考通道（think:false）：词义释义无需长推理链。
+ */
+export async function explainWord(word, age = 9, lang = '英语', context = '') {
+  const w = String(word || '').trim();
+  if (!w) throw new Error('缺少词语');
+  const ctx = String(context || '').trim();
+  /* 先查持久层：命中即返回，跨进程/跨读者复用 */
+  const persisted = getExplanation(w, age, lang);
+  if (persisted) return persisted;
+  /* 键与持久层同口径（不含 ctx），再经进程内缓存 + 在途去重 + 并发上限 */
+  const key = sha1('we|' + age + '|' + lang + '|' + w);
+  const out = await cachedGenerate(key, [{ role: 'user', content: wordPrompt(w, age, lang, ctx) }], { temperature: 0.5, think: false });
+  if (out) putExplanation(w, age, lang, out);
+  return out;
+}
+
+/** 批量查“哪些词已有讲解”，供正文着色（黑/灰）；纯查库，不触发任何生成。 */
+export function vocabExplainStatus(words, age = 9, lang = '英语') {
+  const list = Array.isArray(words) ? words.map((x) => String(x || '').trim()).filter(Boolean) : [];
+  return wordsWithExplanation(list, age, lang);
 }
 
 /* 词语形态守卫：带标点或空白的“词”不可能在正文里被完整匹配（多半是模型把整句抄回来了） */
@@ -170,10 +240,13 @@ export async function answerFeedback(text) {
   const t = String(text || '').trim();
   if (!t) throw new Error('缺少内容');
   const messages = [
-    { role: 'system', content: '你是一位耐心的少儿辅导老师。请用简短、鼓励、适合孩子理解的中文回应，不超过两三句。' },
+    { role: 'system', content: '你是一位耐心的少儿辅导老师。直接给出回应，不要复述题目、不要铺垫，不超过两三句。' },
     { role: 'user', content: t },
   ];
-  return enqueue(() => callLLM(messages, 0.7));
+  /* think:false —— 鼓励式点评是短文本生成，没有推理链需求。bc95fca 关思考时漏了这条，
+     留下“答完题等 30~50s 才出讲解”的体感；混合思考模型开着思考慢一个数量级。
+     第 4 个参数才是 think（callLLM 形参为 messages, temperature, timeout, think） */
+  return enqueue(() => callLLM(messages, 0.7, undefined, false));
 }
 
 export { BusyError };

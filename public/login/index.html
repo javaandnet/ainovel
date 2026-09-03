@@ -34,7 +34,11 @@
   </div>
 <script>
 const $ = (s) => document.querySelector(s);
-const homeFor = (u) => (u && u.role === 'superadmin') ? '/admin/dashboard.html' : '/admin/';
+/* 登录后去向：优先回跳 next（仅允许站内 /novel/ 或 /admin/ 前缀，防开放重定向），否则按角色落地 */
+const NEXT = (() => {
+  try { const n = new URLSearchParams(location.search).get('next') || ''; return /^\/(novel|admin)\//.test(n) ? n : ''; } catch { return ''; }
+})();
+const homeFor = (u) => NEXT || ((u && u.role === 'superadmin') ? '/admin/dashboard.html' : '/admin/');
 async function toMe() {
   try { const r = await fetch('/api/me'); const j = await r.json(); if (j && j.user) { location.replace(homeFor(j.user)); return true; } } catch {}
   return false;

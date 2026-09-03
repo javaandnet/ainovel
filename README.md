@@ -18,6 +18,8 @@ npm start
 
 访问 http://localhost:3400
 
+> 上服务器请看 `DEPLOY.md`（未入库）：首次部署脚本、重发必带 `--exclude .env` 的原因、验证清单与已知坑都在里面。
+
 ## 项目结构
 
 ```

@@ -94,10 +94,14 @@
       '      <button class="tts-icon-btn" id="learnModeBtn" title="学习模式开关"></button>',
       '    </div>',
       '    <div class="settings-row">',
+      '      <label>自动生成词义</label>',
+      '      <button class="tts-icon-btn" id="autoExplainBtn" title="开页后自动依次生成生词讲解（首次较慢，之后全站秒显）"></button>',
+      '    </div>',
+      '    <div class="settings-row">',
       '      <label>学习语言</label>',
       '      <select id="learnLang" class="tts-rate-select">',
-      '        <option value="英语" selected>英语</option>',
-      '        <option value="日语">日语</option>',
+      '        <option value="英语">英语</option>',
+      '        <option value="日语" selected>日语</option>',
       '        <option value="韩语">韩语</option>',
       '        <option value="中文">中文</option>',
       '      </select>',
@@ -125,7 +129,10 @@
       '<div class="quiz-panel" id="quizPanel">',
       '  <div class="ai-panel-header">',
       '    <span class="ai-panel-title" id="quizTitle">本章小测试</span>',
-      '    <button class="tts-icon-btn" id="quizPanelClose" title="关闭">✕</button>',
+      '    <span class="quiz-head-actions">',
+      '      <button class="tts-icon-btn quiz-regen" id="quizRegenerate" title="换一组新题（重新调用 AI 出题，平时不自动换题）">↻</button>',
+      '      <button class="tts-icon-btn" id="quizPanelClose" title="关闭">✕</button>',
+      '    </span>',
       '  </div>',
       '  <div class="quiz-body" id="quizBody">加载中...</div>',
       '</div>'
@@ -161,6 +168,7 @@
     var learnModeBtn = pick('learnModeBtn');
     var learnLangSel = pick('learnLang');
     var learnAgeSel = pick('learnAge');
+    var autoExplainBtn = pick('autoExplainBtn');
     var explainPanel = pick('explainPanel');
     var explainPanelClose = pick('explainPanelClose');
     var explainBody = pick('explainBody');
@@ -169,6 +177,7 @@
     var quizPanelClose = pick('quizPanelClose');
     var quizTitle = pick('quizTitle');
     var quizBody = pick('quizBody');
+    var quizRegenerate = pick('quizRegenerate');
     document.body.appendChild(holder);
 
     /* ===== 1b. 提取内联章节导航 → 悬浮面板，隐藏原始导航 ===== */
@@ -810,12 +819,17 @@
       try { localStorage.setItem(key, val); } catch (e) {}
     }
     function isLearnMode() { return getLearnSetting('learnMode', '0') === '1'; }
-    function learnLang() { return getLearnSetting('learnLang', '英语'); }
+    function learnLang() { return getLearnSetting('learnLang', '日语'); }
     function learnAge() { return getLearnSetting('learnAge', '9'); }
 
     function refreshLearnModeBtn() {
       if (isLearnMode()) { learnModeBtn.classList.add('active'); learnModeBtn.textContent = '🟢'; }
       else { learnModeBtn.classList.remove('active'); learnModeBtn.textContent = '⚪'; }
+    }
+    function refreshAutoBtn() {
+      var on = isAutoExplain();
+      autoExplainBtn.classList.toggle('active', on);
+      autoExplainBtn.textContent = on ? '🟢' : '⚪';
     }
 
     /* 设置面板开合 */
@@ -823,6 +837,7 @@
       settingsPanel.classList.add('open');
       toolbar.style.display = 'none';
       refreshLearnModeBtn();
+      refreshAutoBtn();
       learnLangSel.value = learnLang();
       learnAgeSel.value = learnAge();
     });
@@ -836,8 +851,18 @@
       /* 标注跟着模式走：开列拉词表上粗体，关则恢复纯文本，不留无意义的标记 */
       if (isLearnMode()) { applyVocab(); } else { clearWordMarks(); }
     });
+    /* 自动生成词义开关：开启即对当前章缺失词补生成并落库；关闭则后台批次自行停止 */
+    autoExplainBtn.addEventListener('click', function () {
+      setLearnSetting('autoExplain', isAutoExplain() ? '0' : '1');
+      refreshAutoBtn();
+      if (isAutoExplain() && isLearnMode()) { var ws = vocabCache[learnAge()]; if (ws) { autoGenerate(ws); } }
+    });
     /* 讲解语言只影响讲解文本的语种，词表只跟年龄有关，切语言不必重标 */
-    learnLangSel.addEventListener('change', function () { setLearnSetting('learnLang', learnLangSel.value); });
+    learnLangSel.addEventListener('change', function () {
+      setLearnSetting('learnLang', learnLangSel.value);
+      /* 词义按 (词,年龄,语言) 分档：切语言后重查状态，让黑/灰跟着新语言走 */
+      if (isLearnMode() && vocabCache[learnAge()]) { refreshWordStatus(vocabCache[learnAge()]); }
+    });
     learnAgeSel.addEventListener('change', function () {
       setLearnSetting('learnAge', learnAgeSel.value);
       if (isLearnMode()) { applyVocab(); }
@@ -855,6 +880,68 @@
       apiPost('/api/reader/explain', { sentence: sentenceText, age: learnAge(), lang: learnLang() })
         .then(function (data) { explainBody.textContent = data.explanation || '（无讲解）'; })
         .catch(function (err) { explainBody.textContent = '讲解失败：' + err.message; });
+    }
+
+    /* ===== 8a-bis. 单词讲解（按词持久缓存）：点词秒显、状态着色、可选自动生成 ===== */
+    var explainDone = {};        /* word -> true，当前(年龄,语言)下已有讲解的词，用于黑/灰着色 */
+    var autoRunning = false;     /* 自动生成互斥锁：服务端已有并发上限，这里再防同章重复触发 */
+
+    function isAutoExplain() { return getLearnSetting('autoExplain', '0') === '1'; }
+    function setWordDone(el, done) { if (!el) { return; } el.classList.toggle('done', !!done); el.classList.toggle('pending', !done); }
+    function applyWordColors() {
+      var els = content.querySelectorAll('.tts-word');
+      for (var i = 0; i < els.length; i++) { setWordDone(els[i], !!explainDone[els[i].textContent]); }
+    }
+    function recordWordDone(w) { if (w) { explainDone[w] = true; applyWordColors(); } }
+
+    /* 点词：走 (词+年龄+语言) 口径端点，命中库即秒显；原句只作语境。成功后把该词转黑并记账 */
+    function explainWord(word, context, doneEl) {
+      var w = String(word || '').trim();
+      if (!w) { return; }
+      explainBody.textContent = '加载中...';
+      explainPanel.classList.add('open');
+      toolbar.style.display = 'none';
+      apiPost('/api/reader/explain-word', { word: w, age: learnAge(), lang: learnLang(), context: context || '' })
+        .then(function (data) {
+          explainBody.textContent = data.explanation || '（无讲解）';
+          recordWordDone(w);
+          if (doneEl) { setWordDone(doneEl, true); }
+        })
+        .catch(function (err) { explainBody.textContent = '讲解失败：' + err.message; });
+    }
+
+    /* 标注后拉一次状态：已有讲解的词点亮成黑体；开了自动生成则接着把灰体补齐 */
+    function refreshWordStatus(words) {
+      explainDone = {};                       /* 换章/换年龄/换语言都要按新口径重算，先清空 */
+      if (!words || !words.length) { return; }
+      apiPost('/api/reader/word-status', { words: words, age: learnAge(), lang: learnLang() })
+        .then(function (data) {
+          (data.have || []).forEach(function (w) { explainDone[w] = true; });
+          applyWordColors();
+          if (isAutoExplain()) { autoGenerate(words); }
+        })
+        .catch(function () { if (isAutoExplain()) { autoGenerate(words); } });
+    }
+
+    /* 自动生成：单并发依次补齐缺失词义（温和对待单点推理服务），边生成边转黑，落库后全站复用 */
+    function autoGenerate(words) {
+      if (autoRunning || !isLearnMode() || !isAutoExplain()) { return; }
+      autoRunning = true;
+      var pending = (words || []).filter(function (w) { return !explainDone[w]; });
+      if (!pending.length) { autoRunning = false; flashTip('本章词义已全部生成（' + words.length + '/' + words.length + ' 命中缓存）', 2500); return; }
+      var ctx = String(getChapterContent() || '').slice(0, 200);
+      var i = 0;
+      /* 先说清判断结果：已生成多少（跳过）、还差多少（要补），避免看着像从头跑 */
+      flashTip('已生成 ' + (words.length - pending.length) + '/' + words.length + '，补齐剩余 ' + pending.length + ' 个… 0/' + pending.length, 0);
+      (function next() {
+        if (!isLearnMode() || !isAutoExplain()) { autoRunning = false; setSwipeHint(''); return; }
+        if (i >= pending.length) { autoRunning = false; flashTip('本章词义已生成完成 ✓', 2500); return; }
+        var w = pending[i++];
+        apiPost('/api/reader/explain-word', { word: w, age: learnAge(), lang: learnLang(), context: ctx })
+          .then(function (data) { if (data && data.explanation) { explainDone[w] = true; applyWordColors(); } })
+          .catch(function () { /* 单词失败不阻断整批 */ })
+          .then(function () { flashTip('正在生成词义… ' + i + '/' + pending.length, 0); setTimeout(next, 250); });
+      })();
     }
 
     /* ===== 8b. 生词标注：学习模式下把值得积累的词语加粗，读者一眼能认出可学的词 ===== */
@@ -898,7 +985,7 @@
         for (var i = 0; i < hits.length; i++) {
           if (hits[i].start > cursor) { frag.appendChild(document.createTextNode(text.slice(cursor, hits[i].start))); }
           var b = document.createElement('b');
-          b.className = 'tts-word';
+          b.className = 'tts-word ' + (explainDone[text.slice(hits[i].start, hits[i].end)] ? 'done' : 'pending');
           b.textContent = text.slice(hits[i].start, hits[i].end);
           frag.appendChild(b);
           cursor = hits[i].end;
@@ -922,18 +1009,24 @@
       if (!words.length) { flashTip('本章未挑出可标注的生词（候选均不在原文）', 5000); return; }
       flashTip('生词表已取到，但正文未匹配到', 5000);
     }
+    /* 统一出口：把词标到正文 → 汇报进展 → 拉词义状态（黑/灰）+（若开启）自动生成 */
+    function presentVocab(words, instant) {
+      reportVocab(words, markWords(words), instant);
+      refreshWordStatus(words);
+    }
     function applyVocab() {
       var age = learnAge();
       vocabApplied = age;
+      explainDone = {};
       /* 发布时已按默认年龄预生成并内嵌：直接用，零请求、开页即已标好 */
       var pre = preloadReaderData();
       if (pre && pre.vocab && String(pre.vocab.age) === String(age) && Array.isArray(pre.vocab.words)) {
         vocabCache[age] = pre.vocab.words;
-        reportVocab(pre.vocab.words, markWords(pre.vocab.words), true);
+        presentVocab(pre.vocab.words, true);
         return;
       }
       /* 本次会话里已经回源过同一年龄（切走又切回）：也不必再请求 */
-      if (vocabCache[age]) { reportVocab(vocabCache[age], markWords(vocabCache[age]), true); return; }
+      if (vocabCache[age]) { presentVocab(vocabCache[age], true); return; }
       /* 回源要几秒到几十秒（看服务端缓存命不命中、推理服务器忙不忙），进展提示得常驻到请求回来，
          不然提示 1.2s 就消失，读者只会觉得“点了没反应” */
       flashTip('正在标注生词…', 0);
@@ -943,7 +1036,7 @@
           vocabCache[age] = words;
           /* 迟到响应守卫：口径已变（切了年龄）或已退出学习模式，就不往正文上涂了 */
           if (vocabApplied !== age || !isLearnMode()) { setSwipeHint(''); return; }
-          reportVocab(words, markWords(words));
+          presentVocab(words);
         })
         .catch(function (err) { flashTip('生词标注失败：' + err.message, 6000); });
     }
@@ -954,7 +1047,7 @@
       var w = e.target && e.target.closest ? e.target.closest('.tts-word') : null;
       if (!w || !content.contains(w)) { return; }
       var owner = w.closest('.tts-sentence');
-      explainSentence('词语：' + w.textContent + '\n原句：' + (owner ? owner.textContent : w.textContent));
+      explainWord(w.textContent, owner ? owner.textContent : '', w);
     });
 
     /* 章节测试 */
@@ -977,21 +1070,41 @@
       return null;
     }
 
-    function startQuiz() {
+    /* 本章此年龄档被读者主动换过题：记在本地，否则刷新后页面内嵌的旧题会盖掉他选的这套 */
+    function quizRegenFlag(age) { return location.pathname + '|' + age; }
+    function readRegenMap() {
+      try { var m = JSON.parse(getLearnSetting('quizRegenPages', '{}')); return (m && typeof m === 'object') ? m : {}; } catch (e) { return {}; }
+    }
+    function isQuizRegenerated(age) { return !!readRegenMap()[quizRegenFlag(age)]; }
+    function markQuizRegenerated(age) {
+      var m = readRegenMap();
+      if (Object.keys(m).length > 60) { m = {}; }   /* 只是“最近换过题”的便签，过大就重开，不和本地存储较真 */
+      m[quizRegenFlag(age)] = 1;
+      setLearnSetting('quizRegenPages', JSON.stringify(m));
+    }
+
+    /**
+     * 打开本章小测试。
+     * @param {boolean} [force] - 仅「换一组新题」按钮传 true：绕开缓存重新出题。
+     *   调用方必须显式传值，别把 click 事件对象直接交进来（事件对象是 truthy，
+     *   会变成“每次点开始答题都重新出题”，正是要避免的行为）。
+     */
+    function startQuiz(force) {
+      force = force === true;
       quizPanel.classList.add('open');
       toolbar.style.display = 'none';
       var age = learnAge();
       var pre = preloadReaderData();
-      /* 发布时已按默认年龄预生成：命中即用，零 LLM、即时呈现 */
-      if (pre && pre.quiz && String(pre.quiz.age) === String(age) && Array.isArray(pre.quiz.questions) && pre.quiz.questions.length) {
+      /* 平时一律复用已生成的题：页面内嵌优先（零请求）；换过题的章节改走服务端持久缓存 */
+      if (!force && !isQuizRegenerated(age) && pre && pre.quiz && String(pre.quiz.age) === String(age) && Array.isArray(pre.quiz.questions) && pre.quiz.questions.length) {
         quizQuestions = pre.quiz.questions; quizIndex = 0; quizScore = 0; renderQuizQuestion(); return;
       }
-      /* 年龄不匹配或旧页面：走服务端（带缓存 + 在途去重），命中后同样即时 */
-      quizBody.textContent = '正在出题...';
-      apiPost('/api/reader/quiz', { document: getChapterContent(), age: age })
+      quizBody.textContent = force ? '正在换一组新题…' : '正在出题...';
+      apiPost('/api/reader/quiz', { document: getChapterContent(), age: age, force: force })
         .then(function (data) {
           var arr = data.questions;
           if (!arr || !arr.length) { quizBody.textContent = '出题失败：未返回题目'; return; }
+          if (force) { markQuizRegenerated(age); }
           quizQuestions = arr; quizIndex = 0; quizScore = 0; renderQuizQuestion();
         })
         .catch(function (err) { quizBody.textContent = '出题失败：' + err.message; });
@@ -1043,11 +1156,12 @@
       /* 讲解 */
       var fb = document.createElement('div');
       fb.className = 'quiz-feedback';
-      fb.textContent = '思考中...';
+      /* 判定结果先立刻落地：AI 讲解是锦上添花，不该让孩子对着一块“思考中”空等 */
+      fb.textContent = isCorrect ? '回答正确 ✓' : ('答错了，正确答案是 ' + letters[correctIdx]);
       quizBody.appendChild(fb);
       var fbText = '题目：' + q.question + '\n孩子选了' + selectedLetter + '，正确答案是' + letters[correctIdx] + '。请用鼓励语气简短讲解。';
       apiPost('/api/reader/feedback', { text: fbText })
-        .then(function (data) { fb.textContent = data.feedback || (isCorrect ? '回答正确！' : '正确答案是 ' + letters[correctIdx] + '。'); })
+        .then(function (data) { if (data && data.feedback) { fb.textContent = data.feedback; } })
         .catch(function () { fb.textContent = isCorrect ? '回答正确！' : '正确答案是 ' + letters[correctIdx] + '。'; });
       /* 下一题按钮 */
       var next = document.createElement('button');
@@ -1073,11 +1187,17 @@
       var again = document.createElement('button');
       again.className = 'ai-send-btn quiz-next';
       again.textContent = '再测一次';
-      again.addEventListener('click', startQuiz);
+      again.addEventListener('click', function () { startQuiz(false); });   /* 同一套题重做，不再花一次生成 */
       quizBody.appendChild(again);
+      var swap = document.createElement('button');
+      swap.className = 'ai-send-btn quiz-next';
+      swap.textContent = '换一组新题';
+      swap.addEventListener('click', function () { startQuiz(true); });     /* 只有这里才强制重新出题 */
+      quizBody.appendChild(swap);
     }
 
-    quizFab.addEventListener('click', startQuiz);
+    quizFab.addEventListener('click', function () { startQuiz(false); });
+    quizRegenerate.addEventListener('click', function () { startQuiz(true); });
     refreshLearnModeBtn();
     /* 学习模式本就是开启状态（偏好持久化）：进页即标注，不必等读者去设置里重开一次 */
     if (isLearnMode()) { applyVocab(); }
