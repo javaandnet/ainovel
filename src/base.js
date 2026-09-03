@@ -31,7 +31,7 @@ if (BASE_PATH !== '' && BASE_PATH !== '/novel') {
  * 需要带前缀的应用命名空间（相对 BASE 的内部路径）。
  * 其余路径（书页 /<uid>/... 、根落地页 /）原样放行，不做平移。
  */
-const APP_NAMESPACES = /^\/(api|login|tts|admin)(\/|\?|$)/;
+const APP_NAMESPACES = /^\/(api|login|tts|tts-audio|admin)(\/|\?|$)/;
 
 /** 书页（已发布站点）的对外路径：书页直接挂在 BASE 下，不再叠加 /novel */
 function sitePath(...segs) {

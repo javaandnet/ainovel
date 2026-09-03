@@ -126,6 +126,11 @@
     color: #f39c12; font-size: 13px; min-width: 52px; white-space: nowrap;
 }
 
+/* 引擎切换行 */
+.tts-engine-row { gap: 10px !important; align-items: center; }
+.engine-btn { white-space: nowrap; }
+.tts-engine-hint { color: #7f8c8d; font-size: 12px; }
+
 /* 翻阅手势提示（左右滑动 / 方向键切章）：跟随滑动方向贴边显示，不拦截点击 */
 .swipe-hint {
     position: fixed; top: 50%; z-index: 999; pointer-events: none;

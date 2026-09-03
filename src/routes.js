@@ -21,6 +21,7 @@ import * as store from './auth/userStore.js';
 import { requireAuth, requireSuperadmin, currentUser, setSessionCookie, clearSessionCookie } from './auth/session.js';
 import { BASE_PATH, sitePath } from './base.js';
 import { generateQuiz, explainSentence, explainWord, vocabExplainStatus, askQuestion, answerFeedback, pickVocab } from './reader/aiService.js';
+import { synthesize as ttsSynthesize, computeHash as ttsComputeHash } from './reader/ttsStore.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -189,6 +190,62 @@ export function registerRoutes(app) {
   app.post('/api/reader/feedback', readerRateLimit, async (req, res) => {
     try { res.json({ ok: true, feedback: await answerFeedback(req.body?.text) }); }
     catch (e) { readerErr(res, e); }
+  });
+
+  /* TTS 音频合成：句子级 mp3，带存在性校验防滥用 */
+  app.post('/api/tts/sentence', readerRateLimit, async (req, res) => {
+    try {
+      const { chapterUrl, text, voice, rate } = req.body || {};
+      if (!chapterUrl || !text || !voice || !rate) {
+        return res.status(400).json({ error: '缺少参数：chapterUrl, text, voice, rate' });
+      }
+      // 音色白名单
+      const ALLOWED_VOICES = new Set(['zh-CN-YunxiNeural', 'zh-CN-XiaoxiaoNeural', 'zh-CN-YunjianNeural', 'zh-TW-YunHsiaoNeural']);
+      if (!ALLOWED_VOICES.has(voice)) {
+        return res.status(400).json({ error: `不支持的音色：${voice}` });
+      }
+      // 语速白名单
+      const ALLOWED_RATES = new Set(['-30%', '+0%', '+50%']);
+      if (!ALLOWED_RATES.has(rate)) {
+        return res.status(400).json({ error: `不支持的语速：${rate}` });
+      }
+      // 存在性校验：从章节 URL 提取文件路径，读取正文，确认句子存在
+      // chapterUrl 形如 "/novel/<uid>/<novelDir>/<chapterFile>.html" 或 "/novel/<novelDir>/<chapterFile>.html"
+      const urlMatch = chapterUrl.match(/^\/novel\/(?:([^/]+)\/)?([^/]+)\/([^/]+\.html)$/);
+      if (!urlMatch) {
+        return res.status(400).json({ error: '无效的 chapterUrl 格式' });
+      }
+      const [, uid, novelDir, chapterFile] = urlMatch;
+      const chapterPath = path.join(OUT_ROOT, uid || '', novelDir, chapterFile);
+      // 防路径穿越
+      if (!chapterPath.startsWith(OUT_ROOT)) {
+        return res.status(400).json({ error: '非法的章节路径' });
+      }
+      if (!fs.existsSync(chapterPath)) {
+        return res.status(404).json({ error: '章节文件不存在' });
+      }
+      const html = fs.readFileSync(chapterPath, 'utf8');
+      // 提取 <div class="content">...</div> 内的文本
+      const contentMatch = html.match(/<div class="content">([\s\S]*?)<\/div>/);
+      if (!contentMatch) {
+        return res.status(400).json({ error: '章节无正文内容' });
+      }
+      const chapterText = contentMatch[1].replace(/<[^>]+>/g, '').replace(/\s+/g, '');
+      if (!chapterText.includes(text.replace(/\s+/g, ''))) {
+        return res.status(400).json({ error: '句子不在章节正文中（存在性校验失败）' });
+      }
+      // 合成
+      const result = await ttsSynthesize(text, voice, rate);
+      if (!result) {
+        return res.status(503).json({ error: '合成失败，请回退到浏览器 TTS', fallback: 'browser' });
+      }
+      // 返回音频文件的相对路径（相对于 data/tts/）和 hash
+      const hash = ttsComputeHash(text, voice, rate);
+      const relPath = path.relative(path.join(ROOT, 'data', 'tts'), result.filePath);
+      res.json({ ok: true, hash, audioPath: `/tts-audio/${relPath}`, bytes: result.bytes });
+    } catch (e) {
+      readerErr(res, e);
+    }
   });
 
   // ── 以下 /api 全部需登录 ──

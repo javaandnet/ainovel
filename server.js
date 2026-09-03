@@ -43,6 +43,7 @@ registerRoutes(app);
 // 静态资源（登录页公开；管理页 HTML 壳公开，其数据接口受鉴权保护）
 app.use('/login', express.static(path.join(__dirname, 'public/login')));
 app.use('/tts', express.static(path.join(__dirname, 'public/tts')));
+app.use('/tts-audio', express.static(path.join(__dirname, 'data/tts'), { immutable: true, maxAge: '1y' }));
 app.use('/admin', express.static(path.join(__dirname, 'public/admin')));
 app.use('/novel', express.static(path.join(__dirname, 'public/novel')));
 app.use(express.static(path.join(__dirname, 'public')));

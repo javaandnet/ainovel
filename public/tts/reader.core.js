@@ -4,8 +4,9 @@
  * 由同目录 reader.js 带时间戳动态加载，因此修改本文件（或 reader.css）后立即对所有
  * 历史已发布页面生效：只需同步这一个文件到服务器，不需要重新发布任何小说章节。
  *
- * 能力：正文逐句切分 → speechSynthesis 逐句朗读 → 当前句高亮 + 自动滚动跟随
- *      → 读完本章自动跳下一章（?autoplay=1 自动开播）→ 语速/音色/连读偏好持久化
+ * 能力：正文逐句切分 → 双引擎朗读（网页版：speechSynthesis；语音版：服务端 mp3 合成）
+ *      → 当前句高亮 + 自动滚动跟随 → 读完本章自动跳下一章（?autoplay=1 自动开播）
+ *      → 语速/音色/连读/引擎偏好持久化 → Media Session 锁屏控件
  *      → 屏幕常亮 / 息屏省电切换（默认息屏省电，靠静音保活维持出声）
  *      → 定时关闭朗读（15/30/60 分钟到点停，或本章读完停；跨章连读不丢）
  *      → 左右滑动（触屏）/ 方向键（桌面）翻阅上一章下一章
@@ -92,6 +93,10 @@
       '      <option value="end">⏱ 本章结束</option>',
       '    </select>',
       '    <span class="tts-sleep-left" id="ttsSleepLeft"></span>',
+      '  </div>',
+      '  <div class="tts-row tts-engine-row">',
+      '    <button class="tts-btn engine-btn" id="ttsEngine" title="切换朗读引擎：网页版（浏览器 TTS）或语音版（服务端合成 mp3）">🌐 网页版</button>',
+      '    <span class="tts-engine-hint" id="ttsEngineHint">浏览器 TTS，息屏可能无声</span>',
       '  </div>',
       '  <div class="tts-row"><span class="tts-hint" id="ttsHint" style="display:none"></span></div>',
       '</div>',
@@ -314,6 +319,9 @@
     var wakeLock = null; /* 屏幕唤醒锁，防止朗读时息屏 */
     var keepScreenOn = false; /* 默认息屏省电：只留声音；打开才在朗读时锁屏（偏好读取见第 5 节） */
     var silentAudio = null;  /* 静音循环，见 syncKeepAlive */
+    var ttsEngine = 'browser'; /* 'browser' | 'audio' */
+    var audioEl = null;        /* 语音版 <audio> 元素 */
+    var currentAudioUrl = null; /* 当前播放的音频 URL（用于 Media Session） */
 
     /* 0.05s 静音 WAV：单独看不发声，但足以让系统认为「本页正在放音频」。
        Web Speech 不像 <audio> 那样会占住音频会话，iOS/Android 一息屏就把合成挂起，
@@ -546,6 +554,8 @@
       if (sleepExpired()) { fireSleep(); return; }
       if (idx < 0) { idx = 0; }
       if (idx >= sentences.length) { onChapterEnd(); return; }
+      /* 引擎分发：语音版走音频合成，网页版走浏览器 TTS */
+      if (ttsEngine === 'audio') { speakSentenceAudio(idx); return; }
       ensureVoicesReady();
       currentIndex = idx;
       playing = true;
@@ -576,6 +586,133 @@
         }
       };
       synth.speak(u);
+    }
+
+    /* 语音版：从服务端合成 mp3 并播放 */
+    function speakSentenceAudio(idx) {
+      if (idx < 0) { idx = 0; }
+      if (idx >= sentences.length) { onChapterEnd(); return; }
+      currentIndex = idx;
+      playing = true;
+      paused = false;
+      requestWakeLock();
+      seq++;
+      markReading(idx);
+      updateProgress();
+      updatePlayBtn();
+      var mySeq = seq;
+      var text = sentences[idx].textContent;
+      /* 音色映射：浏览器 voiceName -> Edge voice */
+      var voiceMap = {
+        'zh-CN-YunxiNeural': 'zh-CN-YunxiNeural',
+        'zh-CN-XiaoxiaoNeural': 'zh-CN-XiaoxiaoNeural',
+        'zh-CN-YunjianNeural': 'zh-CN-YunjianNeural',
+        'zh-TW-YunHsiaoNeural': 'zh-TW-YunHsiaoNeural'
+      };
+      var voiceName = voiceMap[voiceSel.value] || 'zh-CN-YunxiNeural';
+      var rateMap = { '0.7': '-30%', '1': '+0%', '1.5': '+50%' };
+      var rateStr = rateMap[rateEl.value] || '+0%';
+      var chapterUrl = window.location.pathname;
+      fetch('/novel/api/tts/sentence', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chapterUrl: chapterUrl, text: text, voice: voiceName, rate: rateStr })
+      }).then(function (r) { return r.json(); }).then(function (data) {
+        if (mySeq !== seq) { return; } /* 已切走，作废 */
+        if (!data.ok || !data.audioPath) {
+          /* 合成失败，自动回落到浏览器 TTS */
+          showHint('语音版合成失败，回落到网页版');
+          switchEngine('browser');
+          speakSentence(idx);
+          return;
+        }
+        spokenOnce = true;
+        if (!audioEl) {
+          audioEl = new Audio();
+          audioEl.addEventListener('ended', function () {
+            if (playing && !paused && mySeq === seq) { speakSentence(currentIndex + 1); }
+          });
+          audioEl.addEventListener('error', function () {
+            if (playing && mySeq === seq) {
+              playing = false;
+              paused = false;
+              releaseWakeLock();
+              updatePlayBtn();
+              showHint('音频播放中断');
+            }
+          });
+        }
+        currentAudioUrl = data.audioPath;
+        audioEl.src = currentAudioUrl;
+        audioEl.play().catch(function () {
+          if (mySeq === seq) { showHint('音频播放被浏览器拦截（需手势触发）'); }
+        });
+        setupMediaSession();
+      }).catch(function (err) {
+        if (mySeq === seq) {
+          showHint('语音版请求失败：' + err.message);
+          switchEngine('browser');
+          speakSentence(idx);
+        }
+      });
+    }
+
+    /* Media Session：锁屏/蓝牙耳机控件 */
+    function setupMediaSession() {
+      if (!('mediaSession' in navigator)) { return; }
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: document.title || '小说朗读',
+          artist: 'ainovel',
+          album: '阅读模式'
+        });
+        navigator.mediaSession.setActionHandler('play', function () {
+          if (ttsEngine === 'audio' && audioEl) { audioEl.play(); }
+          else if (!paused) { synth.resume(); }
+        });
+        navigator.mediaSession.setActionHandler('pause', function () {
+          if (ttsEngine === 'audio' && audioEl) { audioEl.pause(); }
+          else { synth.pause(); }
+          paused = true;
+          updatePlayBtn();
+        });
+        navigator.mediaSession.setActionHandler('previoustrack', function () {
+          if (currentIndex > 0) { speakSentence(currentIndex - 1); }
+        });
+        navigator.mediaSession.setActionHandler('nexttrack', function () {
+          speakSentence(currentIndex + 1);
+        });
+        navigator.mediaSession.setActionHandler('seekto', function (details) {
+          if (ttsEngine === 'audio' && audioEl && details.seekTime != null) {
+            audioEl.currentTime = details.seekTime;
+          }
+        });
+      } catch (e) { /* 部分浏览器不支持 Media Session，静默忽略 */ }
+    }
+
+    /* 切换引擎 */
+    function switchEngine(engine) {
+      if (engine === ttsEngine) { return; }
+      /* 停止当前播放 */
+      if (playing) {
+        if (ttsEngine === 'audio' && audioEl) { audioEl.pause(); audioEl.src = ''; }
+        else { synth.cancel(); }
+        playing = false;
+        paused = false;
+        releaseWakeLock();
+        updatePlayBtn();
+      }
+      ttsEngine = engine;
+      localStorage.setItem('ttsEngine', engine);
+      var btn = document.getElementById('ttsEngine');
+      var hint = document.getElementById('ttsEngineHint');
+      if (engine === 'audio') {
+        btn.textContent = '🎵 语音版';
+        hint.textContent = '服务端 mp3，息屏有声（需网络）';
+      } else {
+        btn.textContent = '🌐 网页版';
+        hint.textContent = '浏览器 TTS，息屏可能无声';
+      }
     }
 
     /* ===== 4. 控件绑定 ===== */
@@ -849,6 +986,21 @@
       if (keepScreenOn) { if (playing) { requestWakeLock(); } }
       else { releaseWakeLock(); }
       flashTip(keepScreenOn ? '☀ 朗读时屏幕保持常亮' : '🌙 息屏省电：屏幕会熄灭，只保留声音');
+    });
+
+    /* 引擎偏好 */
+    var engineBtn = document.getElementById('ttsEngine');
+    var engineHint = document.getElementById('ttsEngineHint');
+    try {
+      var savedEngine = localStorage.getItem('ttsEngine');
+      if (savedEngine === 'audio' || savedEngine === 'browser') { ttsEngine = savedEngine; }
+    } catch (eEng) {}
+    if (ttsEngine === 'audio') {
+      engineBtn.textContent = '🎵 语音版';
+      engineHint.textContent = '服务端 mp3，息屏有声（需网络）';
+    }
+    engineBtn.addEventListener('click', function () {
+      switchEngine(ttsEngine === 'browser' ? 'audio' : 'browser');
     });
 
     /* 定时关闭：分钟档选中即重新计时，「本章结束」挂章节档，选「不定时」即取消 */
