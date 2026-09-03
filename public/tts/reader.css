@@ -129,6 +129,9 @@
 /* 引擎切换行 */
 .tts-engine-row { gap: 10px !important; align-items: center; }
 .engine-btn { white-space: nowrap; }
+.gen-btn { white-space: nowrap; background: #27ae60; }
+.gen-btn:hover { background: #229954; }
+.gen-btn:disabled { background: #95a5a6; cursor: not-allowed; }
 .tts-engine-hint { color: #7f8c8d; font-size: 12px; }
 
 /* 翻阅手势提示（左右滑动 / 方向键切章）：跟随滑动方向贴边显示，不拦截点击 */

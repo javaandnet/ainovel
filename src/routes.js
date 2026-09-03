@@ -205,7 +205,7 @@ export function registerRoutes(app) {
         return res.status(400).json({ error: `不支持的音色：${voice}` });
       }
       // 语速白名单
-      const ALLOWED_RATES = new Set(['-30%', '+0%', '+50%']);
+      const ALLOWED_RATES = new Set(['-20%', '+0%', '+30%', '+50%']);
       if (!ALLOWED_RATES.has(rate)) {
         return res.status(400).json({ error: `不支持的语速：${rate}` });
       }

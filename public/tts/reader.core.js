@@ -96,6 +96,7 @@
       '  </div>',
       '  <div class="tts-row tts-engine-row">',
       '    <button class="tts-btn engine-btn" id="ttsEngine" title="切换朗读引擎：网页版（浏览器 TTS）或语音版（服务端合成 mp3）">🌐 网页版</button>',
+      '    <button class="tts-btn gen-btn" id="ttsGenChapter" title="预生成全章音频（语音版专用，生成后可离线播放）">📥 生成全章</button>',
       '    <span class="tts-engine-hint" id="ttsEngineHint">浏览器 TTS，息屏可能无声</span>',
       '  </div>',
       '  <div class="tts-row"><span class="tts-hint" id="ttsHint" style="display:none"></span></div>',
@@ -610,8 +611,8 @@
         'zh-TW-YunHsiaoNeural': 'zh-TW-YunHsiaoNeural'
       };
       var voiceName = voiceMap[voiceSel.value] || 'zh-CN-YunxiNeural';
-      var rateMap = { '0.7': '-30%', '1': '+0%', '1.5': '+50%' };
-      var rateStr = rateMap[rateEl.value] || '+0%';
+      var rateMap = { '0.7': '-20%', '1': '+30%', '1.5': '+50%' };
+      var rateStr = rateMap[rateEl.value] || '+30%';
       var chapterUrl = window.location.pathname;
       fetch('/novel/api/tts/sentence', {
         method: 'POST',
@@ -1001,6 +1002,49 @@
     }
     engineBtn.addEventListener('click', function () {
       switchEngine(ttsEngine === 'browser' ? 'audio' : 'browser');
+    });
+
+    /* 生成全章音频（语音版专用） */
+    var genBtn = document.getElementById('ttsGenChapter');
+    genBtn.addEventListener('click', function () {
+      if (ttsEngine !== 'audio') {
+        showHint('请先切换到语音版再生成全章音频');
+        return;
+      }
+      var voiceMap = { 'zh-CN-YunxiNeural': 'zh-CN-YunxiNeural', 'zh-CN-XiaoxiaoNeural': 'zh-CN-XiaoxiaoNeural', 'zh-CN-YunjianNeural': 'zh-CN-YunjianNeural', 'zh-TW-YunHsiaoNeural': 'zh-TW-YunHsiaoNeural' };
+      var voiceName = voiceMap[voiceSel.value] || 'zh-CN-YunxiNeural';
+      var rateMap = { '0.7': '-20%', '1': '+30%', '1.5': '+50%' };
+      var rateStr = rateMap[rateEl.value] || '+30%';
+      var chapterUrl = window.location.pathname;
+      var total = sentences.length;
+      var done = 0;
+      var failed = 0;
+      genBtn.disabled = true;
+      genBtn.textContent = '⏳ 生成中...';
+      showHint('开始生成全章音频（0/' + total + '）');
+      function genNext(idx) {
+        if (idx >= total) {
+          genBtn.disabled = false;
+          genBtn.textContent = '📥 生成全章';
+          showHint('全章音频生成完成：' + done + ' 成功，' + failed + ' 失败');
+          return;
+        }
+        var text = sentences[idx].textContent;
+        fetch('/novel/api/tts/sentence', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chapterUrl: chapterUrl, text: text, voice: voiceName, rate: rateStr })
+        }).then(function (r) { return r.json(); }).then(function (data) {
+          if (data.ok) { done++; } else { failed++; }
+          showHint('生成中（' + (done + failed) + '/' + total + '）');
+          setTimeout(function () { genNext(idx + 1); }, 100); /* 间隔 100ms 避免压垮服务端 */
+        }).catch(function () {
+          failed++;
+          showHint('生成中（' + (done + failed) + '/' + total + '）');
+          setTimeout(function () { genNext(idx + 1); }, 100);
+        });
+      }
+      genNext(0);
     });
 
     /* 定时关闭：分钟档选中即重新计时，「本章结束」挂章节档，选「不定时」即取消 */
