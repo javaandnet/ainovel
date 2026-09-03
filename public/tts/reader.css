@@ -117,6 +117,15 @@
 .tts-icon-btn:hover { background: #46627f; }
 .tts-icon-btn.active { background: #3498db; color: #fff; border-color: #3498db; }
 
+/* 省电 / 定时行：屏幕常亮开关 + 定时关闭下拉 + 剩余时间。单独成行是因为
+   上面一行已被音色（flex:1）占满，硬挤进去窄屏就会整行掉字 */
+.tts-power-row { gap: 8px !important; }
+.power-btn { white-space: nowrap; }
+.power-btn.active { background: #3498db; }
+.tts-sleep-left {
+    color: #f39c12; font-size: 13px; min-width: 52px; white-space: nowrap;
+}
+
 /* 翻阅手势提示（左右滑动 / 方向键切章）：跟随滑动方向贴边显示，不拦截点击 */
 .swipe-hint {
     position: fixed; top: 50%; z-index: 999; pointer-events: none;

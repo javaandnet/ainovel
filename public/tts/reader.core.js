@@ -6,11 +6,28 @@
  *
  * 能力：正文逐句切分 → speechSynthesis 逐句朗读 → 当前句高亮 + 自动滚动跟随
  *      → 读完本章自动跳下一章（?autoplay=1 自动开播）→ 语速/音色/连读偏好持久化
+ *      → 屏幕常亮 / 息屏省电切换（默认息屏省电，靠静音保活维持出声）
+ *      → 定时关闭朗读（15/30/60 分钟到点停，或本章读完停；跨章连读不丢）
  *      → 左右滑动（触屏）/ 方向键（桌面）翻阅上一章下一章
  *      → 学习模式下按年龄挑生词并加粗标注，点词可直接查该词
  */
 (function () {
   'use strict';
+
+  /* 站点前缀：本文件由 reader.js 以 <BASE>/tts/reader.core.js?v=… 加载，
+     所以用自身 URL 反推前缀，AI 接口一律按该前缀发出。站点挂在 /novel 还是根路径、
+     以后改成什么别的前缀，都不必重新发布任何章节页（与 reader.js 同一套自定位思路）。
+     判不出前缀时记为 null：宁可让 AI 调用当场报错，也不要用错路径默默 404。 */
+  var APP_BASE = (function () {
+    var src = document.currentScript && document.currentScript.src;
+    if (!src) {
+      var all = document.scripts;
+      for (var i = all.length - 1; i >= 0; i--) {
+        if (/\/tts\/reader\.core\.js/.test(all[i].src)) { src = all[i].src; break; }
+      }
+    }
+    return src ? src.replace(/\/tts\/reader\.core\.js.*$/, '') : null;
+  })();
 
   function boot() {
     /* 加载器为避免原始导航闪烁，已用 html.reader-nav-defer 提前把它收起（见 reader.js）。
@@ -64,6 +81,17 @@
       '    </select>',
       '    <button class="tts-icon-btn" id="ttsAuto" title="连续朗读下一章">🔁</button>',
       '    <button class="tts-icon-btn" id="ttsCloseIcon" title="关闭">✕</button>',
+      '  </div>',
+      '  <div class="tts-row tts-power-row">',
+      '    <button class="tts-btn power-btn" id="ttsScreen" title="朗读时是否保持屏幕常亮；默认不锁屏，屏幕会熄灭、只保留声音（省电）">🌙 息屏省电</button>',
+      '    <select id="ttsSleep" class="tts-rate-select" title="定时关闭朗读">',
+      '      <option value="0">⏱ 不定时</option>',
+      '      <option value="15">⏱ 15 分钟</option>',
+      '      <option value="30">⏱ 30 分钟</option>',
+      '      <option value="60">⏱ 1 小时</option>',
+      '      <option value="end">⏱ 本章结束</option>',
+      '    </select>',
+      '    <span class="tts-sleep-left" id="ttsSleepLeft"></span>',
       '  </div>',
       '  <div class="tts-row"><span class="tts-hint" id="ttsHint" style="display:none"></span></div>',
       '</div>',
@@ -151,6 +179,9 @@
     var rateEl = pick('ttsRate');
     var voiceSel = pick('ttsVoice');
     var autoEl = pick('ttsAuto');
+    var screenBtn = pick('ttsScreen');
+    var sleepSel = pick('ttsSleep');
+    var sleepLeftEl = pick('ttsSleepLeft');
     var hintEl = pick('ttsHint');
     var chapterPanel = pick('chapterPanel');
     var chapterNavLinks = pick('chapterNavLinks');
@@ -281,15 +312,24 @@
     var spokenOnce = false;
     var voicesReady = false;
     var wakeLock = null; /* 屏幕唤醒锁，防止朗读时息屏 */
+    var keepScreenOn = false; /* 默认息屏省电：只留声音；打开才在朗读时锁屏（偏好读取见第 5 节） */
+    var silentAudio = null;  /* 静音循环，见 syncKeepAlive */
 
-    /* 请求屏幕唤醒锁 */
+    /* 0.05s 静音 WAV：单独看不发声，但足以让系统认为「本页正在放音频」。
+       Web Speech 不像 <audio> 那样会占住音频会话，iOS/Android 一息屏就把合成挂起，
+       靠这个静音循环把会话顶住，息屏朗读才可能真的持续出声。 */
+    var SILENT_WAV = 'data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YSADAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==';
+
+    /* 请求屏幕唤醒锁（仅在开了「屏幕常亮」时；息屏省电模式下反过来要主动放锁） */
     function requestWakeLock() {
-      if (!navigator.wakeLock) { return; }
+      if (!keepScreenOn) { releaseWakeLock(); return; }
+      if (!navigator.wakeLock) { syncKeepAlive(); return; }
       if (wakeLock) { return; }
       navigator.wakeLock.request('screen').then(function (lock) {
         wakeLock = lock;
-        lock.addEventListener('release', function () { wakeLock = null; });
-      }).catch(function () { /* 息屏请求可能被拒绝，静默忽略 */ });
+        lock.addEventListener('release', function () { wakeLock = null; syncKeepAlive(); });
+        syncKeepAlive();
+      }).catch(function () { /* 息屏请求可能被拒绝，静默忽略 */ syncKeepAlive(); });
     }
     /* 释放屏幕唤醒锁 */
     function releaseWakeLock() {
@@ -297,7 +337,113 @@
         wakeLock.release().catch(function () {});
         wakeLock = null;
       }
+      syncKeepAlive();
     }
+    /* 只要屏幕实际会息（关了常亮，或本机没拿到锁——iOS Safari 整个不支持 wakeLock，
+       选了常亮也照样息屏），就需要静音保活；屏幕真亮着时不必多占这份功耗。 */
+    function syncKeepAlive() {
+      if (!playing || (keepScreenOn && wakeLock)) {
+        if (silentAudio && !silentAudio.paused) { silentAudio.pause(); }
+        return;
+      }
+      if (!silentAudio) {
+        silentAudio = new Audio(SILENT_WAV);
+        silentAudio.loop = true;
+        silentAudio.volume = 0;
+      }
+      if (silentAudio.paused) { silentAudio.play().catch(function () {}); }
+    }
+
+    /* ===== 3b. 定时关闭：15 / 30 / 60 分钟到点停，或「本章结束」读完即停 ===== */
+    var sleepDeadline = 0; /* 绝对毫秒时间戳，0 = 未定时 */
+    var sleepAlarm = null;
+    var sleepTick = null;
+    var sleepAtChapterEnd = false; /* 「本章结束」档：不倒数，读完本章即停，与分钟档互斥 */
+
+    function fmtLeft(ms) {
+      var s = Math.max(0, Math.round(ms / 1000));
+      var m = Math.floor(s / 60);
+      var r = s % 60;
+      return (m < 10 ? '0' : '') + m + ':' + (r < 10 ? '0' : '') + r;
+    }
+    function sleepExpired() { return sleepDeadline > 0 && Date.now() >= sleepDeadline; }
+    function clearSleep() {
+      clearTimeout(sleepAlarm);
+      clearInterval(sleepTick);
+      sleepAlarm = null;
+      sleepTick = null;
+      sleepDeadline = 0;
+      sleepAtChapterEnd = false;
+      sleepLeftEl.textContent = '';
+      try { sessionStorage.removeItem('ttsSleepDeadline'); } catch (e) {}
+    }
+    function armSleep(minutes) {
+      clearTimeout(sleepAlarm);
+      clearInterval(sleepTick);
+      if (!minutes) { clearSleep(); return; }
+      sleepAtChapterEnd = false;
+      /* 存绝对时间戳而不是剩余秒数：连读跳章会重载页面，重新计时等于把定时拉长 */
+      sleepDeadline = Date.now() + minutes * 60000;
+      try { sessionStorage.setItem('ttsSleepDeadline', minutes + '|' + sleepDeadline); } catch (e) {}
+      scheduleSleep();
+      flashTip('⏱ ' + (minutes >= 60 ? (minutes / 60) + ' 小时' : minutes + ' 分钟') + '后自动停止朗读');
+    }
+    /* 「本章结束」档：没有倒数，因此只挂标志，到点动作由 onChapterEnd 就地执行 */
+    function armChapterEndSleep() {
+      clearTimeout(sleepAlarm);
+      clearInterval(sleepTick);
+      sleepAlarm = null;
+      sleepTick = null;
+      sleepDeadline = 0;
+      sleepAtChapterEnd = true;
+      try { sessionStorage.setItem('ttsSleepDeadline', 'end|0'); } catch (e) {}
+      sleepLeftEl.textContent = '⏱ 本章末';
+      flashTip('⏱ 本章读完即停止（连读也会在此停下，不跳下一章）');
+    }
+    /* 撤档：连同把下拉还原成「不定时」，否则下一次开播仍被旧设定卡住 */
+    function disarmChapterEndSleep() {
+      sleepAtChapterEnd = false;
+      sleepSel.value = '0';
+      sleepLeftEl.textContent = '';
+      try { sessionStorage.removeItem('ttsSleepDeadline'); } catch (e) {}
+    }
+    function scheduleSleep() {
+      if (sleepDeadline <= 0) { return; }
+      var left = sleepDeadline - Date.now();
+      if (left <= 0) { fireSleep(); return; }
+      clearTimeout(sleepAlarm);
+      clearInterval(sleepTick);
+      sleepLeftEl.textContent = '⏱ ' + fmtLeft(left);
+      /* 后台标签页的 setTimeout 会被节流到分钟级，到点不一定准；因此真正停声还由
+         句子边界兜底（见 speakSentence 开头的 sleepExpired 判定）。 */
+      sleepAlarm = setTimeout(fireSleep, left);
+      sleepTick = setInterval(function () {
+        if (sleepDeadline <= 0) { clearInterval(sleepTick); return; }
+        var l = sleepDeadline - Date.now();
+        if (l <= 0) { fireSleep(); return; }
+        sleepLeftEl.textContent = '⏱ ' + fmtLeft(l);
+      }, 1000);
+    }
+    function fireSleep() {
+      if (sleepDeadline <= 0) { return; } /* 句子边界与计时器都会到点，先到先得 */
+      clearSleep();
+      sleepSel.value = '0';
+      if (!playing) { return; }
+      synth.cancel();
+      seq++; /* 作废旧 utterance 的回调，否则 cancel 触发的 onend 会又跳下一句 */
+      playing = false;
+      paused = false;
+      releaseWakeLock();
+      updatePlayBtn();
+      updateProgress('定时关闭：已停止朗读');
+    }
+    /* 回前台立刻校准倒计时：后台节流期间可能已经过期，靠节流后的回调会晚很久；
+       顺带补一次锁——息屏时系统会自行 release，不补的话回前台就不常亮了。 */
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState !== 'visible') { return; }
+      scheduleSleep();
+      if (playing && !paused) { requestWakeLock(); }
+    });
 
     /* 预加载语音，确保首次点击即可朗读 */
     function ensureVoicesReady() {
@@ -377,6 +523,14 @@
         updateProgress();
         return;
       }
+      /* 「本章结束」档在此消耗：必须抢在连读跳章之前，否则连读会把本次定时带进下一章。
+         位置放在 spokenOnce 判定之后——自动开播被手势策略拦下时本章一个字没读，不该把档耗掉。 */
+      if (sleepAtChapterEnd) {
+        disarmChapterEndSleep();
+        updateProgress('定时关闭：本章读完，已停止朗读');
+        if (isLearnMode()) { setTimeout(startQuiz, 500); }
+        return;
+      }
       if (autoEl.classList.contains('active')) {
         var url = findNextUrl();
         if (url) { location.href = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'autoplay=1'; return; }
@@ -388,6 +542,8 @@
       if (isLearnMode()) { setTimeout(startQuiz, 500); }
     }
     function speakSentence(idx) {
+      /* 到点后每句入口都不再出声：比只靠 setTimeout 可靠（后台节流下定时器会迟到） */
+      if (sleepExpired()) { fireSleep(); return; }
       if (idx < 0) { idx = 0; }
       if (idx >= sentences.length) { onChapterEnd(); return; }
       ensureVoicesReady();
@@ -557,6 +713,9 @@
     }
     function goChapter(url) {
       if (!url) { return; }
+      /* 「本章结束」只对设定时所处的那一章有效：手动翻章说明读者还在听，
+         不该被上一章的设定卡在新章末尾，故此处撤档（分钟档跨章继续，由 sessionStorage 接上） */
+      if (sleepAtChapterEnd) { disarmChapterEndSleep(); }
       /* 翻章前收尾朗读：离开本页后语音合成与屏幕常亮都不该继续占用 */
       synth.cancel();
       playing = false;
@@ -670,6 +829,53 @@
       try { localStorage.setItem('ttsAutoNext', autoEl.classList.contains('active') ? '1' : '0'); } catch (e6) {}
     });
 
+    /* 屏幕常亮偏好：默认息屏省电（省电优先，出声由静音保活顶住），
+       要锁屏得主动开成常亮；一次选定长期生效，连读跳章换页也不会变。
+       只认 '1'：无记录与历史上存下的 '0' 同义（都回到省电默认）。 */
+    function updateScreenBtn() {
+      screenBtn.textContent = keepScreenOn ? '☀ 屏幕常亮' : '🌙 息屏省电';
+      screenBtn.classList.toggle('active', keepScreenOn);
+    }
+    try {
+      if (localStorage.getItem('ttsKeepScreenOn') === '1') { keepScreenOn = true; }
+    } catch (eScr) {}
+    updateScreenBtn();
+    screenBtn.addEventListener('click', function () {
+      keepScreenOn = !keepScreenOn;
+      try { localStorage.setItem('ttsKeepScreenOn', keepScreenOn ? '1' : '0'); } catch (eScr2) {}
+      updateScreenBtn();
+      /* 两个方向都得当场见效：关常亮要立刻放锁（否则屏幕一直被上一句钉住），
+         开常亮要在朗读中立刻补锁。 */
+      if (keepScreenOn) { if (playing) { requestWakeLock(); } }
+      else { releaseWakeLock(); }
+      flashTip(keepScreenOn ? '☀ 朗读时屏幕保持常亮' : '🌙 息屏省电：屏幕会熄灭，只保留声音');
+    });
+
+    /* 定时关闭：分钟档选中即重新计时，「本章结束」挂章节档，选「不定时」即取消 */
+    sleepSel.addEventListener('change', function () {
+      var v = sleepSel.value;
+      if (v === 'end') { armChapterEndSleep(); return; }
+      armSleep(parseInt(v, 10) || 0);
+    });
+    /* 连读跳章会重载页面，未走完的定时必须接上（存的是绝对时间戳，不会因此续命） */
+    try {
+      var savedSleep = (sessionStorage.getItem('ttsSleepDeadline') || '').split('|');
+      var savedMins = parseInt(savedSleep[0], 10) || 0;
+      var savedDeadline = parseInt(savedSleep[1], 10) || 0;
+      if (savedSleep[0] === 'end') {
+        /* 刷新本页时接上章节档；手动翻章已在 goChapter 撤档，不会带到新章 */
+        sleepAtChapterEnd = true;
+        sleepSel.value = 'end';
+        sleepLeftEl.textContent = '⏱ 本章末';
+      } else if (savedDeadline > Date.now() && sleepSel.querySelector('option[value="' + savedMins + '"]')) {
+        sleepDeadline = savedDeadline;
+        sleepSel.value = String(savedMins);
+        scheduleSleep();
+      } else if (savedDeadline) {
+        clearSleep(); /* 定时已在换页间走完 */
+      }
+    } catch (eSl) {}
+
     /* ===== 6. 面板开合与连读自动开播 ===== */
     /* 面板弹起时整个工具栏隐藏（底部面板本就占住右下角），由各面板的 ✕ 负责还原 */
     function openPanel() { panel.classList.add('open'); toolbar.style.display = 'none'; }
@@ -706,7 +912,8 @@
 
     /* 阅读器 AI：统一走服务端代理（密钥不外泄、同源可达、服务端缓存 + 限并发 + 限流） */
     function apiPost(path, body) {
-      return fetch(path, {
+      if (APP_BASE === null) { throw new Error('无法判定站点前缀（reader.core.js 未经 reader.js 加载）'); }
+      return fetch(APP_BASE + path, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body || {})
