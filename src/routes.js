@@ -19,6 +19,7 @@ import { MENU_ACTIONS, AI_TOOLS } from './tools/registry.js';
 import { publishNovelLocal, publishSiteIndexLocal, sanitizeDirName } from './skills/novelPublisher/publish.js';
 import * as store from './auth/userStore.js';
 import { requireAuth, requireSuperadmin, currentUser, setSessionCookie, clearSessionCookie } from './auth/session.js';
+import { BASE_PATH, sitePath } from './base.js';
 import { generateQuiz, explainSentence, explainWord, vocabExplainStatus, askQuestion, answerFeedback, pickVocab } from './reader/aiService.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -410,7 +411,7 @@ export function registerRoutes(app) {
     const rr = resolveNovelForUser(req.params.id, req.user);
     if (!rr.ok) return res.status(rr.status).json({ error: rr.error });
     const userOut = path.join(OUT_ROOT, req.user.id);
-    const urlBase = '/novel/' + encodeURIComponent(req.user.id);
+    const urlBase = sitePath(encodeURIComponent(req.user.id)) + '/';
     try {
       // premakeQuiz 是“发布时跑不跑 LLM 预生成”的总开关，现在同时管测试题与生词表：
       // 调用方传 false 意味着不想让发布变慢，不该只跳过测试题而偷偷多跑三十次挑词
@@ -439,17 +440,17 @@ export function registerRoutes(app) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  // ── 阅读入口：/novel/ 必须落到「当前登录用户的作品站」──
+  // ── 阅读入口：<BASE>/ 必须落到「当前登录用户的作品站」──
   // 不能靠静态目录的默认 index：public/novel/index.html 是多用户改造前的遗留物，
   // 它只链向顶层旧版书页（无内嵌 quiz/vocab），会让每个人从首页进来都踩在旧页面上。
   // 路由注册在 express.static 之前（server.js 先 registerRoutes 再挂静态），故能截下 /novel/。
   app.get(['/novel', '/novel/'], (req, res) => {
     const user = currentUser(req);
-    if (!user) return res.redirect('/login/?next=' + encodeURIComponent('/novel/'));
+    if (!user) return res.redirect(`${BASE_PATH}/login/?next=` + encodeURIComponent(`${BASE_PATH}/`));
     const site = path.join(OUT_ROOT, user.id, 'index.html');
     // 该用户还没发布过作品：送去管理页，而不是给一个 404
-    if (!fs.existsSync(site)) return res.redirect('/admin/');
-    res.redirect('/novel/' + encodeURIComponent(user.id) + '/index.html');
+    if (!fs.existsSync(site)) return res.redirect(`${BASE_PATH}/admin/`);
+    res.redirect(sitePath(encodeURIComponent(user.id), 'index.html'));
   });
 
   // ── 分享：实时计算已发布阅读地址（不存库，避免改名后 404 陈旧链接）──
@@ -458,7 +459,7 @@ export function registerRoutes(app) {
     if (!rr.ok) return res.status(rr.status).json({ error: rr.error });
     const novelDir = sanitizeDirName(rr.novel.title || '小说');
     const uid = encodeURIComponent(rr.novel.user_id);
-    const url = `/novel/${uid}/${novelDir}/index.html`;
+    const url = sitePath(uid, novelDir, 'index.html');
     const published = fs.existsSync(path.join(OUT_ROOT, rr.novel.user_id, novelDir, 'index.html'));
     res.json({ url, published, title: rr.novel.title });
   });
@@ -535,7 +536,7 @@ async function runAiTool(user, name, args) {
     case 'generateOutlines': return await run('generateChapterOutlines', { totalChapters: Number(args.totalChapters || 10) });
     case 'publishNovel': {
       const userOut = path.join(OUT_ROOT, user.id);
-      return await publishNovelLocal(rr.absPath, userOut, { urlBase: '/novel/' + encodeURIComponent(user.id), generateQuiz: (text, age) => generateQuiz(text, age), pickVocab: (text, age) => pickVocab(text, age) });
+      return await publishNovelLocal(rr.absPath, userOut, { urlBase: sitePath(encodeURIComponent(user.id)) + '/', generateQuiz: (text, age) => generateQuiz(text, age), pickVocab: (text, age) => pickVocab(text, age) });
     }
     case 'checkConsistency': {
       const tool = makeTool();

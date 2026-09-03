@@ -34,13 +34,16 @@
   </div>
 <script>
 const $ = (s) => document.querySelector(s);
-/* 登录后去向：优先回跳 next（仅允许站内 /novel/ 或 /admin/ 前缀，防开放重定向），否则按角色落地 */
+/* 站点前缀：本页固定在 <BASE>/login/ 下，据此反推前缀；接口与跳转都按前缀发出，
+   站点改挂其它子路径不必重新生成任何页面。 */
+const BASE = location.pathname.replace(/\/login(\/.*)?$/, '');
+/* 登录后去向：优先回跳 next（仅允许站内 <BASE>/ 下的书页或管理页，防开放重定向），否则按角色落地 */
 const NEXT = (() => {
   try { const n = new URLSearchParams(location.search).get('next') || ''; return /^\/(novel|admin)\//.test(n) ? n : ''; } catch { return ''; }
 })();
-const homeFor = (u) => NEXT || ((u && u.role === 'superadmin') ? '/admin/dashboard.html' : '/admin/');
+const homeFor = (u) => NEXT || ((u && u.role === 'superadmin') ? BASE + '/admin/dashboard.html' : BASE + '/admin/');
 async function toMe() {
-  try { const r = await fetch('/api/me'); const j = await r.json(); if (j && j.user) { location.replace(homeFor(j.user)); return true; } } catch {}
+  try { const r = await fetch(BASE + '/api/me'); const j = await r.json(); if (j && j.user) { location.replace(homeFor(j.user)); return true; } } catch {}
   return false;
 }
 $('#f').addEventListener('submit', async (e) => {
@@ -50,7 +53,7 @@ $('#f').addEventListener('submit', async (e) => {
   if (!username || !password) { msg.textContent = '请输入用户名和密码'; return; }
   $('#go').disabled = true; $('#go').textContent = '登录中…';
   try {
-    const r = await fetch('/api/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ username, password }) });
+    const r = await fetch(BASE + '/api/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ username, password }) });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j.ok) throw new Error(j.error || ('登录失败 (' + r.status + ')'));
     msg.className = 'msg ok'; msg.textContent = '登录成功，进入中…';

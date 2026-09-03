@@ -23,7 +23,9 @@
   <h1>📚 AI 小说平台</h1>
   <p>阅读 · 管理 · 学习</p>
   <div class="links">
-    <a class="link-card" href="/admin/">
+    <!-- 链接按默认 BASE_PATH=/novel 写死：本页挂在站点根（本机开发入口，经 nginx 只转发 /novel/ 故线上不可达）。
+         改 BASE_PATH 时同步这里。 -->
+    <a class="link-card" href="/novel/admin/">
       <div class="icon">⚙️</div>
       <div class="title">小说管理</div>
       <div class="desc">列举、追加、删除章节，命令式操作</div>

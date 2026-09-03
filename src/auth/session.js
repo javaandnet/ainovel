@@ -8,6 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { findUserById } from './userStore.js';
+import { BASE_PATH } from '../base.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
@@ -24,6 +25,9 @@ function readEnvFile(key) {
 
 const COOKIE_NAME = 'ainovel_session';
 const MAX_AGE = 7 * 24 * 3600; // 秒（7 天）
+// 会话 cookie 只在本站点前缀内可见：同域下还跑着 aiinterview 等其它子系统，
+// Path=/ 会让两边的 cookie 互相发送（面上串味）；不带尾斜杠以同时覆盖 /novel 与 /novel/。
+const COOKIE_PATH = BASE_PATH || '/';
 
 let SECRET = process.env.SESSION_SECRET || readEnvFile('SESSION_SECRET');
 if (!SECRET) {
@@ -70,10 +74,10 @@ function parseCookies(header) {
 
 function setSessionCookie(res, uid) {
   const token = createToken(uid);
-  res.setHeader('Set-Cookie', `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${MAX_AGE}`);
+  res.setHeader('Set-Cookie', `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=${COOKIE_PATH}; Max-Age=${MAX_AGE}`);
 }
 function clearSessionCookie(res) {
-  res.setHeader('Set-Cookie', `${COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`);
+  res.setHeader('Set-Cookie', `${COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=${COOKIE_PATH}; Max-Age=0`);
 }
 
 /** 从请求 cookie 解析当前用户（含禁用二次校验）；未登录返回 null */

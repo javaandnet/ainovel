@@ -160,9 +160,11 @@
 <script>
 const $ = (s) => document.querySelector(s);
 const enc = encodeURIComponent;
-const api = (p, opt) => fetch('/api' + p, opt).then(async r => {
+/* 站点前缀：本页固定在 <BASE>/admin/ 下，据此反推；接口与跳转都按前缀发出 */
+const BASE = location.pathname.replace(/\/admin(\/.*)?$/, '');
+const api = (p, opt) => fetch(BASE + '/api' + p, opt).then(async r => {
   const j = await r.json().catch(() => ({}));
-  if (r.status === 401) { location.replace('/login/'); throw new Error('登录已过期'); }
+  if (r.status === 401) { location.replace(BASE + '/login/'); throw new Error('登录已过期'); }
   if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
   return j;
 });
@@ -189,15 +191,15 @@ document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
 // ── 启动：先确认登录态 ──
 async function boot() {
   try {
-    const me = await fetch('/api/me').then(r => r.json());
-    if (!me || !me.user) { location.replace('/login/'); return; }
+    const me = await fetch(BASE + '/api/me').then(r => r.json());
+    if (!me || !me.user) { location.replace(BASE + '/login/'); return; }
     ME = me.user;
     $('#who').textContent = ME.username + (ME.role === 'superadmin' ? '（超管）' : '');
     $('#logoutBtn').style.display = '';
     if (ME.role === 'superadmin') $('#consoleBtn').style.display = '';
-  } catch (e) { location.replace('/login/'); return; }
-  $('#logoutBtn').onclick = async () => { try { await fetch('/api/logout', { method: 'POST' }); } catch {} location.replace('/login/'); };
-  $('#consoleBtn').onclick = () => { location.href = '/admin/dashboard.html'; };
+  } catch (e) { location.replace(BASE + '/login/'); return; }
+  $('#logoutBtn').onclick = async () => { try { await fetch(BASE + '/api/logout', { method: 'POST' }); } catch {} location.replace(BASE + '/login/'); };
+  $('#consoleBtn').onclick = () => { location.href = BASE + '/admin/dashboard.html'; };
 
   try {
     const [{ groups }, nv] = await Promise.all([api('/menu'), api('/novels')]);

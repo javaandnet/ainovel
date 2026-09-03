@@ -19,6 +19,7 @@ import { marked } from 'marked';
 const Client = function () { throw new Error('SSH 发布已在 ainovel 停用，请使用 publishNovelLocal'); };
 import { resolveSkillPath, checkPath } from '../../utils/skillPathResolver.js';
 import { toChineseOrdinal } from '../../utils/chineseNumber.js';
+import { BASE_PATH } from '../../base.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -64,9 +65,13 @@ function stripLeadingHeading(content) {
  * - reader.core.js 朗读逻辑（由 reader.js 带时间戳加载，改动同步后立即全站生效）
  * - reader.css     朗读样式（同上，带时间戳加载）
  * 好处：调整阅读界面只需同步 assets，不必重新发布任何小说章节
- * 远程路径约定：<directory>/tts/*；章节页位于 <directory>/<小说名>/ 下，故引用 ../tts/
+ * 远程路径约定：<directory>/tts/*；章节页与站点同层，故必须用带前缀的绝对路径引用，
+ * 不能写 ../tts/（章节页在 <站点>/<uid>/<小说名>/ 下，相对层级与站点目录不一）。
  */
-const TTS_READER_REF = '    <script src="/tts/reader.js"></script>'; // ainovel: 本地绝对路径
+// 进发布页的脚本标签：前缀在发布时烧进 HTML（书页是构建产物，改前缀需重发）。
+// marker 必须由同一个常量推导，否则下面“将内嵌 JSON 插到 reader.js 之前”的匹配会默默失效。
+const TTS_READER_TAG = `<script src="${BASE_PATH}/tts/reader.js"></script>`;
+const TTS_READER_REF = `    ${TTS_READER_TAG}`;
 
 /**
  * 站点级资源目录：<directory>/tts/ 存放阅读模式外链资源，它不是小说。
@@ -1681,7 +1686,7 @@ export async function publishNovel(sessionDir, serverConfig, options = {}) {
 
   // 步骤5.5: 同步阅读模式（TTS）资源到 <directory>/tts/
   // 无条件覆盖：章节内容未变时不会触发任何章节重传，因此调整阅读界面无需重发小说
-  // 失败必须显式抛出：章节页引用 ../tts/reader.js，资源缺失等于阅读模式整体不可用
+  // 失败必须显式抛出：章节页引用 <BASE>/tts/reader.js，资源缺失等于阅读模式整体不可用
   const syncedFiles = await syncTtsAssets(serverConfig);
 
   // 步骤6: 生成访问链接
@@ -1952,7 +1957,7 @@ function injectReaderData(html, data) {
   }
   const json = JSON.stringify(data).replace(/</g, '\\u003c');
   const tag = `<script id="novel-reader-data" type="application/json">${json}</script>`;
-  const marker = '<script src="/tts/reader.js"></script>';
+  const marker = TTS_READER_TAG;
   /* 三处替换一律用函数形式返回替换值：题干或词表里出现 $& / $' / $1 这类序列时，
      字符串形式的替换值会把它们当成替换模式展开，内嵌 JSON 当场被撑坏（且无人发现） */
   if (prev) return html.replace(RE, () => tag);
@@ -2084,7 +2089,7 @@ export async function publishNovelLocal(dbPath, outRoot, options = {}) {
   });
   fs.writeFileSync(path.join(targetDir, 'index.html'), indexContent, 'utf-8');
 
-  const urlBase = String(options.urlBase || '/novel').replace(/\/+$/, '');
+  const urlBase = String(options.urlBase ?? BASE_PATH).replace(/\/+$/, '');
   const indexUrl = `${urlBase}/${novelDir}/index.html`;
   console.log(`✅ 本地发布完成: ${targetDir}（${chapterPages.length} 章）→ ${indexUrl}`);
   return { novelDir, indexUrl, chapterCount: chapterPages.length, files: [...written, 'index.html'] };
@@ -2095,7 +2100,7 @@ export async function publishNovelLocal(dbPath, outRoot, options = {}) {
  * @param {Array<{dirName:string,title:string,chapterCount:number}>} novels
  * @param {string} outRoot
  */
-export function publishSiteIndexLocal(novels, outRoot, urlBase = '/novel') {
+export function publishSiteIndexLocal(novels, outRoot, urlBase = BASE_PATH) {
   fs.mkdirSync(outRoot, { recursive: true });
   // generateSiteIndex 消费字段：name / url / updatedText
   const items = novels.map((n) => ({

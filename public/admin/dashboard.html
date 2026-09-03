@@ -79,10 +79,12 @@
 const $ = (s) => document.querySelector(s);
 const enc = encodeURIComponent;
 let ME = null;
+/* 站点前缀：本页固定在 <BASE>/admin/ 下（dashboard.html），据此反推；接口与跳转都按前缀发出 */
+const BASE = location.pathname.replace(/\/admin(\/.*)?$/, '');
 
-const api = (p, opt) => fetch('/api' + p, opt).then(async r => {
+const api = (p, opt) => fetch(BASE + '/api' + p, opt).then(async r => {
   const j = await r.json().catch(() => ({}));
-  if (r.status === 401) { location.replace('/login/'); throw new Error('登录已过期'); }
+  if (r.status === 401) { location.replace(BASE + '/login/'); throw new Error('登录已过期'); }
   if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
   return j;
 });
@@ -101,14 +103,14 @@ function fmtLogin(ts) {
 
 async function boot() {
   try {
-    const me = await fetch('/api/me').then(r => r.json());
-    if (!me || !me.user) { location.replace('/login/'); return; }
-    if (me.user.role !== 'superadmin') { location.replace('/admin/'); return; }
+    const me = await fetch(BASE + '/api/me').then(r => r.json());
+    if (!me || !me.user) { location.replace(BASE + '/login/'); return; }
+    if (me.user.role !== 'superadmin') { location.replace(BASE + '/admin/'); return; }
     ME = me.user;
     $('#who').textContent = ME.username;
-  } catch (e) { location.replace('/login/'); return; }
-  $('#logoutBtn').onclick = async () => { try { await fetch('/api/logout', { method: 'POST' }); } catch {} location.replace('/login/'); };
-  $('#novelsBtn').onclick = () => { location.href = '/admin/'; };
+  } catch (e) { location.replace(BASE + '/login/'); return; }
+  $('#logoutBtn').onclick = async () => { try { await fetch(BASE + '/api/logout', { method: 'POST' }); } catch {} location.replace(BASE + '/login/'); };
+  $('#novelsBtn').onclick = () => { location.href = BASE + '/admin/'; };
   $('#addUser').onclick = addUser;
   loadUsers();
 }
