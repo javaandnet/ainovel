@@ -60,6 +60,7 @@
       '  <div class="toolbar-actions" id="toolbarActions">',
       '    <button class="toolbar-btn" id="settingsFab" title="设置"><span class="tb-ico">⚙</span><span class="tb-txt">设置</span></button>',
       '    <button class="toolbar-btn" id="quizFab" title="本章测试"><span class="tb-ico">📝</span><span class="tb-txt">测试</span></button>',
+      '    <button class="toolbar-btn" id="pinyinFab" title="拼音模式"><span class="tb-ico">🔤</span><span class="tb-txt">拼音</span></button>',
       '    <button class="toolbar-btn" id="aiFab" title="AI 问答"><span class="tb-ico">🤖</span><span class="tb-txt">问答</span></button>',
       '    <button class="toolbar-btn" id="chapterBtn" title="章节目录"><span class="tb-ico">📑</span><span class="tb-txt">目录</span></button>',
       '    <button class="toolbar-btn" id="ttsFab" title="朗读"><span class="tb-ico">🎧</span><span class="tb-txt">朗读</span></button>',
@@ -108,7 +109,10 @@
       '<div class="ai-panel" id="aiPanel">',
       '  <div class="ai-panel-header">',
       '    <span class="ai-panel-title">AI 问答</span>',
-      '    <button class="tts-icon-btn" id="aiPanelClose" title="关闭">✕</button>',
+      '    <span class="ai-panel-actions">',
+      '      <button class="tts-icon-btn speak-btn" id="aiSpeakBtn" title="朗读最新回答">🔊</button>',
+      '      <button class="tts-icon-btn" id="aiPanelClose" title="关闭">✕</button>',
+      '    </span>',
       '  </div>',
       '  <div class="ai-messages" id="aiMessages"></div>',
       '  <div class="ai-input-row">',
@@ -156,7 +160,10 @@
       '<div class="explain-panel" id="explainPanel">',
       '  <div class="ai-panel-header">',
       '    <span class="ai-panel-title">词汇讲解</span>',
-      '    <button class="tts-icon-btn" id="explainPanelClose" title="关闭">✕</button>',
+      '    <span class="ai-panel-actions">',
+      '      <button class="tts-icon-btn speak-btn" id="explainSpeakBtn" title="朗读讲解">🔊</button>',
+      '      <button class="tts-icon-btn" id="explainPanelClose" title="关闭">✕</button>',
+      '    </span>',
       '  </div>',
       '  <div class="explain-body" id="explainBody">加载中...</div>',
       '</div>',
@@ -209,6 +216,8 @@
     var explainPanel = pick('explainPanel');
     var explainPanelClose = pick('explainPanelClose');
     var explainBody = pick('explainBody');
+    var explainSpeakBtn = pick('explainSpeakBtn');
+    var aiSpeakBtn = pick('aiSpeakBtn');
     var quizFab = pick('quizFab');
     var quizPanel = pick('quizPanel');
     var quizPanelClose = pick('quizPanelClose');
@@ -1093,8 +1102,17 @@
       toolbar.style.display = 'none';
     });
     aiPanelClose.addEventListener('click', function () {
+      stopSpeaking(aiSpeakBtn);  /* 关闭面板时停止朗读 */
       aiPanel.classList.remove('open');
       toolbar.style.display = '';
+    });
+    /* 🔊 朗读最新 AI 回答 */
+    aiSpeakBtn.addEventListener('click', function () {
+      if (_speakActive) { stopSpeaking(aiSpeakBtn); return; }
+      var msgs = aiMessages.querySelectorAll('.ai-message-ai');
+      if (!msgs.length) { return; }
+      var lastReply = msgs[msgs.length - 1].textContent || '';
+      if (lastReply && lastReply.trim()) { speakText(lastReply, aiSpeakBtn); }
     });
 
     /* 获取当前章节内容作为上下文 */
@@ -1214,6 +1232,98 @@
       }
     });
 
+    /* ===== 7b. 拼音模式：为汉字加注拼音 ruby 标签，方便小朋友阅读 ===== */
+    var pinyinOn = (function () {
+      try { return localStorage.getItem('pinyinMode') === '1'; } catch (e) { return false; }
+    })();
+    var pinyinData = null; // 从 novel-reader-data 读取
+
+    /* 读取嵌入的拼音 JSON */
+    (function loadPinyinData() {
+      var el = document.getElementById('novel-reader-data');
+      if (!el) return;
+      try {
+        var data = JSON.parse(el.textContent);
+        if (Array.isArray(data.pinyin) && data.pinyin.length) pinyinData = data.pinyin;
+      } catch (e) {}
+    })();
+
+    /* 对一个段落元素应用 ruby 拼音标注 */
+    function applyRubyToPara(p, pyArr) {
+      var text = p.textContent;
+      var chars = Array.from(text);
+      if (!pyArr || pyArr.length !== chars.length) return; // 长度不匹配则跳过
+      var html = '';
+      for (var i = 0; i < chars.length; i++) {
+        var ch = chars[i];
+        var py = pyArr[i] || '';
+        if (py) {
+          html += '<ruby>' + escHtml(ch) + '<rp>(</rp><rt>' + escHtml(py) + '</rt><rp>)</rp></ruby>';
+        } else {
+          html += escHtml(ch);
+        }
+      }
+      p.dataset.origHtml = p.innerHTML;
+      p.innerHTML = html;
+    }
+
+    function escHtml(s) {
+      return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    /* 移除所有段落的 ruby 标注，恢复原始 HTML */
+    function removeRuby() {
+      content.classList.remove('pinyin-active');
+      var paras = content.querySelectorAll('p');
+      for (var i = 0; i < paras.length; i++) {
+        if (paras[i].dataset.origHtml) {
+          paras[i].innerHTML = paras[i].dataset.origHtml;
+          delete paras[i].dataset.origHtml;
+        }
+      }
+    }
+
+    /* 应用拼音：遍历 <p> 按顺序对应 pinyinData 数组 */
+    function applyPinyin() {
+      if (!pinyinData) return;
+      content.classList.add('pinyin-active');
+      var paras = content.querySelectorAll('p');
+      var pi = 0; // pinyinData index
+      for (var i = 0; i < paras.length; i++) {
+        var p = paras[i];
+        // 跳过特殊段落（part-kicker, tts-skip 等无文字内容的）
+        if (p.classList.contains('tts-skip') || p.classList.contains('part-kicker')) continue;
+        if (!p.textContent.trim()) continue;
+        if (pi < pinyinData.length) {
+          applyRubyToPara(p, pinyinData[pi]);
+          pi++;
+        }
+      }
+    }
+
+    /* 切换拼音模式 */
+    function togglePinyin() {
+      pinyinOn = !pinyinOn;
+      try { localStorage.setItem('pinyinMode', pinyinOn ? '1' : '0'); } catch (e) {}
+      if (pinyinOn) {
+        applyPinyin();
+        pinyinFab.classList.add('active');
+      } else {
+        removeRuby();
+        pinyinFab.classList.remove('active');
+      }
+    }
+
+    var pinyinFab = document.getElementById('pinyinFab');
+    if (pinyinFab) {
+      pinyinFab.addEventListener('click', togglePinyin);
+      // 恢复持久化设置
+      if (pinyinOn && pinyinData) {
+        pinyinFab.classList.add('active');
+        applyPinyin();
+      }
+    }
+
     /* ===== 8. 学习模式：设置 / 词汇讲解 / 章节测试 ===== */
     function getLearnSetting(key, def) {
       try { return localStorage.getItem(key) || def; } catch (e) { return def; }
@@ -1273,8 +1383,15 @@
 
     /* 词汇讲解 */
     explainPanelClose.addEventListener('click', function () {
+      stopSpeaking(explainSpeakBtn);  /* 关闭面板时停止朗读 */
       explainPanel.classList.remove('open');
       toolbar.style.display = '';
+    });
+    /* 🔊 朗读讲解内容 */
+    explainSpeakBtn.addEventListener('click', function () {
+      var text = explainBody.textContent || '';
+      if (text === '加载中...' || text === '（无讲解）' || !text.trim()) { return; }
+      speakText(text, explainSpeakBtn);
     });
     function explainSentence(sentenceText) {
       explainBody.textContent = '加载中...';
@@ -1311,6 +1428,84 @@
           if (doneEl) { setWordDone(doneEl, true); }
         })
         .catch(function (err) { explainBody.textContent = '讲解失败：' + err.message; });
+    }
+
+    /* ===== 8c. 讲解/AI问答语音播放：浏览器 speechSynthesis 保底 + 服务端 Edge TTS ===== */
+    var _speakUtterance = null;  /* 当前浏览器朗读实例（用于停止） */
+    var _speakAudio = null;      /* 当前服务端音频实例（用于停止） */
+    var _speakActive = null;     /* 'browser' | 'server' | null */
+
+    /* 学习语言 → Edge TTS 音色 + BCP-47 语言标签 */
+    function langToVoice(lang) {
+      switch (lang) {
+        case '英语': return { voice: 'en-US-JennyNeural', bcp47: 'en-US' };
+        case '日语': return { voice: 'ja-JP-NanamiNeural', bcp47: 'ja-JP' };
+        case '韩语': return { voice: 'en-US-AriaNeural', bcp47: 'en-US' }; /* 韩语无白名单音色，回落英文 */
+        default:     return { voice: 'zh-CN-XiaoxiaoNeural', bcp47: 'zh-CN' };
+      }
+    }
+
+    function stopSpeaking(btn) {
+      if (_speakActive === 'browser' && _speakUtterance) {
+        speechSynthesis.cancel();
+        _speakUtterance = null;
+      }
+      if (_speakActive === 'server' && _speakAudio) {
+        _speakAudio.pause();
+        _speakAudio = null;
+      }
+      _speakActive = null;
+      if (btn) { btn.textContent = '🔊'; btn.title = btn.title.replace('停止', '朗读'); }
+    }
+
+    function speakText(text, btn) {
+      if (!text || !text.trim()) { return; }
+      /* 如果正在播放，点击则停止 */
+      if (_speakActive) { stopSpeaking(btn); return; }
+
+      var langInfo = langToVoice(learnLang());
+      var rate = '+0%';
+
+      if (btn) { btn.textContent = '⏹'; btn.title = '停止朗读'; }
+
+      /* 先尝试服务端 TTS（音质更好、可缓存） */
+      apiPost('/api/tts/explain', { text: text.slice(0, 2000), voice: langInfo.voice, rate: rate })
+        .then(function (data) {
+          if (!data.audioPath) { throw new Error('no audio'); }
+          var audio = new Audio(APP_BASE + data.audioPath);
+          _speakAudio = audio;
+          _speakActive = 'server';
+          audio.addEventListener('ended', function () { stopSpeaking(btn); });
+          audio.addEventListener('error', function () {
+            /* 服务端失败，回落浏览器 */
+            _speakActive = null;
+            speakBrowser(text, langInfo.bcp47, btn);
+          });
+          audio.play().catch(function () {
+            _speakActive = null;
+            speakBrowser(text, langInfo.bcp47, btn);
+          });
+        })
+        .catch(function () {
+          /* 服务端不可用，直接用浏览器 */
+          speakBrowser(text, langInfo.bcp47, btn);
+        });
+    }
+
+    function speakBrowser(text, lang, btn) {
+      if (!('speechSynthesis' in window)) {
+        if (btn) { btn.textContent = '🔊'; btn.title = '朗读讲解'; }
+        return;
+      }
+      speechSynthesis.cancel();
+      var utt = new SpeechSynthesisUtterance(text);
+      utt.lang = lang;
+      utt.rate = 1.0;
+      _speakUtterance = utt;
+      _speakActive = 'browser';
+      utt.addEventListener('end', function () { stopSpeaking(btn); });
+      utt.addEventListener('error', function () { stopSpeaking(btn); });
+      speechSynthesis.speak(utt);
     }
 
     /* 标注后拉一次状态：已有讲解的词点亮成黑体；开了自动生成则接着把灰体补齐 */

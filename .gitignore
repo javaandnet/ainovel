@@ -7,3 +7,5 @@ public/novel/
 /data/system/
 config/users.json
 data/**/*.db
+data/tts/**
+tmp/**

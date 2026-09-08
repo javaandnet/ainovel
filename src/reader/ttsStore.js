@@ -128,7 +128,7 @@ export async function synthesize(text, voice, rate) {
   try {
     const tts = new MsEdgeTTS();
     await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3, { sentenceBoundaryEnabled: false });
-    const result = await tts.toFile(tmpDir, text, { rate: parseInt(rate) || 0 });
+    const result = await tts.toFile(tmpDir, text, { rate: rate || '+0%' });
     tts.close();
     const audioFile = result.audioFilePath;
     if (!fs.existsSync(audioFile)) return null;

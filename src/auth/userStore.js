@@ -68,6 +68,8 @@ function openDb() {
       title TEXT,
       db_file TEXT NOT NULL UNIQUE,
       chapter_count INTEGER NOT NULL DEFAULT 0,
+      vip_hash TEXT,
+      vip_salt TEXT,
       created_at INTEGER,
       updated_at INTEGER,
       created_by TEXT,
@@ -75,6 +77,14 @@ function openDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_novel_user ON novel(user_id);
   `);
+  // 迁移：旧库补充 VIP 列
+  const novelCols = _db.prepare('PRAGMA table_info(novel)').all().map(c => c.name);
+  if (!novelCols.includes('vip_hash')) {
+    _db.exec('ALTER TABLE novel ADD COLUMN vip_hash TEXT');
+  }
+  if (!novelCols.includes('vip_salt')) {
+    _db.exec('ALTER TABLE novel ADD COLUMN vip_salt TEXT');
+  }
   return _db;
 }
 
@@ -177,6 +187,31 @@ function updateNovelMeta(id, { title, chapterCount } = {}) {
   openDb().prepare('UPDATE novel SET title = ?, chapter_count = ?, updated_at = ? WHERE id = ?')
     .run(nt, nc, now(), id);
   return getNovel(id);
+}
+
+// ── VIP 属性 ──
+function isVip(id) {
+  const n = getNovel(id);
+  return !!(n && n.vip_hash);
+}
+function setVipPassword(id, password, actor = 'system') {
+  const n = getNovel(id);
+  if (!n) throw new Error('小说不存在');
+  if (!password || String(password).length < 1) throw new Error('VIP 密码不能为空');
+  const { hash, salt } = hashPassword(password);
+  openDb().prepare('UPDATE novel SET vip_hash = ?, vip_salt = ?, updated_at = ?, updated_by = ? WHERE id = ?')
+    .run(hash, salt, now(), actor, id);
+  return getNovel(id);
+}
+function clearVipPassword(id, actor = 'system') {
+  openDb().prepare('UPDATE novel SET vip_hash = NULL, vip_salt = NULL, updated_at = ?, updated_by = ? WHERE id = ?')
+    .run(now(), actor, id);
+  return getNovel(id);
+}
+function verifyVipPassword(id, password) {
+  const n = getNovel(id);
+  if (!n || !n.vip_hash) return false;
+  return verifyPassword(password, n.vip_hash, n.vip_salt);
 }
 function deleteNovel(id) {
   openDb().prepare('DELETE FROM novel WHERE id = ?').run(id);
@@ -300,6 +335,7 @@ export {
   // novel registry
   listNovelsByUser, listAllNovels, getNovel, findNovelByFile,
   createNovel, updateNovelMeta, updateNovelPath, deleteNovel,
+  isVip, setVipPassword, clearVipPassword, verifyVipPassword,
   // lifecycle
   bootstrap, migrateExistingNovels,
   // crypto helpers (for tests/admin reset)

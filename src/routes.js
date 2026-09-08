@@ -18,7 +18,7 @@ import { llm } from './agent/llm.js';
 import { MENU_ACTIONS, AI_TOOLS } from './tools/registry.js';
 import { publishNovelLocal, publishSiteIndexLocal, sanitizeDirName } from './skills/novelPublisher/publish.js';
 import * as store from './auth/userStore.js';
-import { requireAuth, requireSuperadmin, currentUser, setSessionCookie, clearSessionCookie } from './auth/session.js';
+import { requireAuth, requireSuperadmin, currentUser, setSessionCookie, clearSessionCookie, parseCookies } from './auth/session.js';
 import { BASE_PATH, sitePath } from './base.js';
 import { generateQuiz, explainSentence, explainWord, vocabExplainStatus, askQuestion, answerFeedback, pickVocab } from './reader/aiService.js';
 import { synthesize as ttsSynthesize, computeHash as ttsComputeHash } from './reader/ttsStore.js';
@@ -127,6 +127,70 @@ async function listNovelFiles() {
   return novels.map(({ file, name, chapterCount, updatedAt }) => ({ file, name, chapterCount, updatedAt }));
 }
 
+// ── VIP 服务端闸门（不依赖前端 / sessionStorage，每个书页请求实时校验）──
+// 读者解锁后发 HttpOnly cookie：vip_<novelId> = sha256(vip_hash)。
+// vip_hash 只存 global.db、绝不下发浏览器，故 cookie 值无法伪造；闸门用 DB 重算比对。
+const VIP_COOKIE_PATH = '/novel';               // 书页外部前缀就是 /novel（见 base.js）
+const VIP_COOKIE_MAXAGE = 30 * 24 * 3600;        // 秒（30 天）
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function vipTokenOf(vipHash) {
+  return crypto.createHash('sha256').update(String(vipHash)).digest('hex');
+}
+/** 某用户名下 VIP 小说：sanitize 后目录名 -> { id, token } */
+function vipMapForUid(uid) {
+  const map = {};
+  for (const n of store.listNovelsByUser(uid)) {
+    if (n.vip_hash) map[sanitizeDirName(n.title || '小说')] = { id: n.id, token: vipTokenOf(n.vip_hash) };
+  }
+  return map;
+}
+/** VIP 锁定页：输入密码解锁本小说（成功后写 cookie 并刷新回原页） */
+function renderVipLockPage(uid, novelId) {
+  const api = `${BASE_PATH}/api/reader/vip-unlock`;
+  const home = `${BASE_PATH}/${encodeURIComponent(uid)}/index.html`;
+  const juid = JSON.stringify(String(uid || ''));
+  const jnid = JSON.stringify(String(novelId || ''));
+  return `<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VIP 专属内容</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1e3c72,#2a5298);}
+.card{background:#fff;border-radius:16px;padding:36px 30px;width:90%;max-width:380px;box-shadow:0 12px 40px rgba(0,0,0,.3);text-align:center;}
+.ico{font-size:48px;line-height:1;}
+h2{margin:10px 0 4px;color:#2c3e50;}
+p{color:#7f8c8d;font-size:14px;margin:0 0 20px;}
+input{width:100%;box-sizing:border-box;padding:12px 14px;font-size:16px;border:1px solid #dcdfe6;border-radius:8px;outline:none;}
+input:focus{border-color:#3498db;}
+button{width:100%;margin-top:14px;padding:12px;font-size:16px;font-weight:700;color:#fff;border:none;border-radius:8px;background:linear-gradient(135deg,#f39c12,#e74c3c);cursor:pointer;}
+button:disabled{opacity:.6;cursor:default;}
+.err{color:#e74c3c;font-size:13px;margin-top:12px;min-height:18px;}
+a.back{display:inline-block;margin-top:16px;color:#3498db;text-decoration:none;font-size:13px;}
+</style></head>
+<body><div class="card">
+<div class="ico">🔒</div><h2>VIP 专属内容</h2><p>本小说为 VIP 专属，请输入密码解锁</p>
+<input type="password" id="pwd" placeholder="请输入 VIP 密码" autocomplete="off">
+<button id="btn">解锁</button>
+<div class="err" id="err"></div>
+<a class="back" href="${home}">返回小说列表</a>
+</div>
+<script>
+(function(){
+  var pwd=document.getElementById('pwd'),btn=document.getElementById('btn'),err=document.getElementById('err');
+  function go(){
+    var v=pwd.value.trim(); if(!v){err.textContent='请输入密码';return;}
+    btn.disabled=true;btn.textContent='验证中…';err.textContent='';
+    fetch(${JSON.stringify(api)},{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',
+      body:JSON.stringify({uid:${juid},novelId:${jnid},password:v})})
+    .then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j};});})
+    .then(function(res){ if(res.ok&&res.j&&res.j.ok){location.reload();}else{btn.disabled=false;btn.textContent='解锁';err.textContent=(res.j&&res.j.error)||'密码错误';}})
+    .catch(function(e){btn.disabled=false;btn.textContent='解锁';err.textContent='网络错误：'+e.message;});
+  }
+  btn.onclick=go; pwd.addEventListener('keydown',function(e){if(e.key==='Enter')go();}); pwd.focus();
+})();
+</script></body></html>`;
+}
+
 export function registerRoutes(app) {
   // 净化（对登录/会话/账号管理端点放行：这些响应按设计回显用户名）
   app.use('/api', (req, res, next) => {
@@ -192,6 +256,73 @@ export function registerRoutes(app) {
     catch (e) { readerErr(res, e); }
   });
 
+/* VIP 密码解锁：读者输入密码，服务端校验通过后下发 HttpOnly cookie。
+ * cookie 值 = sha256(vip_hash)，vip_hash 只存服务端从不下发 → 无法伪造。
+ * 传 novelId 只解一本；只传 uid 则尝试该站所有 VIP 小说（一本密码可解锁多本）。 */
+  app.post('/api/reader/vip-unlock', readerRateLimit, (req, res) => {
+    try {
+      const { uid, novelId, password } = req.body || {};
+      const pwd = String(password || '');
+      if (!pwd) return res.status(400).json({ error: '缺少密码' });
+      const grants = [];
+      const tryNovel = (n) => {
+        if (n && n.vip_hash && store.verifyVipPassword(n.id, pwd)) {
+          grants.push(`vip_${n.id}=${vipTokenOf(n.vip_hash)}; HttpOnly; SameSite=Lax; Path=${VIP_COOKIE_PATH}; Max-Age=${VIP_COOKIE_MAXAGE}`);
+        }
+      };
+      if (novelId) {
+        const n = store.getNovel(novelId);
+        if (!n) return res.status(404).json({ error: '小说不存在' });
+        if (uid && n.user_id !== uid) return res.status(403).json({ error: '无权访问该小说' });
+        tryNovel(n);
+      } else if (uid) {
+        for (const n of store.listNovelsByUser(uid)) tryNovel(n);
+      } else {
+        return res.status(400).json({ error: '缺少参数' });
+      }
+      if (grants.length === 0) return res.status(401).json({ error: '密码错误' });
+      res.setHeader('Set-Cookie', grants);
+      res.json({ ok: true, unlocked: grants.length });
+    } catch (e) { readerErr(res, e); }
+  });
+
+  /* 文生图代理：转发至 aibridge /api/bridge/image，密钥留在服务端 */
+  const BRIDGE_IMAGE_URL = (() => {
+    const chat = process.env.AIBRIDGE_URL || '';
+    if (chat.includes('/bridge/chat')) return chat.replace('/bridge/chat', '/bridge/image');
+    return 'http://localhost:3300/api/bridge/image';
+  })();
+  const BRIDGE_KEY = process.env.AIBRIDGE_API_KEY || '';
+
+  app.post('/api/reader/image', readerRateLimit, async (req, res) => {
+    try {
+      const prompt = String(req.body?.prompt || '').trim();
+      if (!prompt) return res.status(400).json({ error: '缺少图片描述' });
+      const bridgeRes = await fetch(BRIDGE_IMAGE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': BRIDGE_KEY },
+        body: JSON.stringify({ prompt, size: req.body?.size, model: req.body?.model }),
+        signal: AbortSignal.timeout(120000),
+      });
+      const data = await bridgeRes.json().catch(() => ({}));
+      if (!bridgeRes.ok || data.ok === false) {
+        return res.status(502).json({ error: data.error || `aibridge HTTP ${bridgeRes.status}` });
+      }
+      res.json({ ok: true, url: data.url, revisedPrompt: data.revised_prompt || null });
+    } catch (e) { readerErr(res, e); }
+  });
+
+  /* ── TTS 音色白名单（正文朗读 + 讲解音频共用）── */
+  const ALLOWED_VOICES = new Set([
+    // 中文
+    'zh-CN-YunxiNeural', 'zh-CN-XiaoxiaoNeural', 'zh-CN-YunjianNeural', 'zh-TW-YunHsiaoNeural',
+    // 英文（讲解用）
+    'en-US-JennyNeural', 'en-US-AriaNeural', 'en-US-AndrewNeural',
+    // 日文（讲解用）
+    'ja-JP-NanamiNeural', 'ja-JP-KeitaNeural',
+  ]);
+  const ALLOWED_RATES = new Set(['-20%', '+0%', '+30%', '+50%']);
+
   /* TTS 音频合成：句子级 mp3，带存在性校验防滥用 */
   app.post('/api/tts/sentence', readerRateLimit, async (req, res) => {
     try {
@@ -199,13 +330,9 @@ export function registerRoutes(app) {
       if (!chapterUrl || !text || !voice || !rate) {
         return res.status(400).json({ error: '缺少参数：chapterUrl, text, voice, rate' });
       }
-      // 音色白名单
-      const ALLOWED_VOICES = new Set(['zh-CN-YunxiNeural', 'zh-CN-XiaoxiaoNeural', 'zh-CN-YunjianNeural', 'zh-TW-YunHsiaoNeural']);
       if (!ALLOWED_VOICES.has(voice)) {
         return res.status(400).json({ error: `不支持的音色：${voice}` });
       }
-      // 语速白名单
-      const ALLOWED_RATES = new Set(['-20%', '+0%', '+30%', '+50%']);
       if (!ALLOWED_RATES.has(rate)) {
         return res.status(400).json({ error: `不支持的语速：${rate}` });
       }
@@ -248,6 +375,35 @@ export function registerRoutes(app) {
     }
   });
 
+  /* TTS 音频合成：讲解文字 / AI 问答结果（无章节存在性校验，有长度限制） */
+  app.post('/api/tts/explain', readerRateLimit, async (req, res) => {
+    try {
+      const { text, voice, rate } = req.body || {};
+      if (!text || !voice || !rate) {
+        return res.status(400).json({ error: '缺少参数：text, voice, rate' });
+      }
+      if (!ALLOWED_VOICES.has(voice)) {
+        return res.status(400).json({ error: `不支持的音色：${voice}` });
+      }
+      if (!ALLOWED_RATES.has(rate)) {
+        return res.status(400).json({ error: `不支持的语速：${rate}` });
+      }
+      // 长度限制：讲解文本通常不超过 2000 字，超过则拒绝
+      if (text.length > 2000) {
+        return res.status(400).json({ error: `文本过长（${text.length} 字，上限 2000）` });
+      }
+      const result = await ttsSynthesize(text, voice, rate);
+      if (!result) {
+        return res.status(503).json({ error: '合成失败，请回退到浏览器 TTS', fallback: 'browser' });
+      }
+      const hash = ttsComputeHash(text, voice, rate);
+      const relPath = path.relative(path.join(ROOT, 'data', 'tts'), result.filePath);
+      res.json({ ok: true, hash, audioPath: `/tts-audio/${relPath}`, bytes: result.bytes });
+    } catch (e) {
+      readerErr(res, e);
+    }
+  });
+
   // ── 以下 /api 全部需登录 ──
   app.use('/api', requireAuth);
 
@@ -259,7 +415,7 @@ export function registerRoutes(app) {
   app.get('/api/novels', (req, res) => {
     const rows = (req.user.role === 'superadmin' && req.query.all === '1')
       ? store.listAllNovels() : store.listNovelsByUser(req.user.id);
-    res.json({ novels: rows.map(n => ({ id: n.id, name: n.title, chapterCount: n.chapter_count, updatedAt: n.updated_at })) });
+    res.json({ novels: rows.map(n => ({ id: n.id, name: n.title, chapterCount: n.chapter_count, updatedAt: n.updated_at, vip: !!n.vip_hash })) });
   });
 
   // ── 新建小说（分配不透明文件名 <uuid>.db 并登记归属）──
@@ -482,19 +638,68 @@ export function registerRoutes(app) {
         pickVocab: premake ? ((text, age) => pickVocab(text, age)) : null,
         vocabAge: quizAge,
       });
-      // 该用户的站点首页（列出其已发布作品）
+      // 该用户的站点首页（列出其已发布作品）；VIP 标记据 global.db 实时判定
       try {
+        const vipByDir = {};
+        const ownerNovels = req.user.role === 'superadmin' ? store.listAllNovels() : store.listNovelsByUser(req.user.id);
+        for (const n of ownerNovels) {
+          if (n.vip_hash) vipByDir[sanitizeDirName(n.title || '小说')] = n.id;
+        }
         const items = [];
         if (fs.existsSync(userOut)) {
           for (const d of fs.readdirSync(userOut)) {
             const idx = path.join(userOut, d, 'index.html');
-            if (fs.existsSync(idx)) items.push({ dirName: d, title: d });
+            if (fs.existsSync(idx)) items.push({ dirName: d, title: d, vip: !!vipByDir[d], novelId: vipByDir[d] || null });
           }
         }
-        publishSiteIndexLocal(items, userOut, urlBase);
+        publishSiteIndexLocal(items, userOut, urlBase, req.user.id);
       } catch { /* 首页失败不影响单本发布 */ }
       res.json({ success: true, ...out });
     } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── VIP 闸门：书页静态资源前置校验（每个请求都过 → 重进/刷新都重新验证）──
+  //   ① 站点首页：未解锁的 VIP 小说整条移除（非 VIP 看不到列表）
+  //   ② 小说子树（目录页 + 章节页）：VIP 未解锁一律锁定页（双重保护）
+  // 注册在 express.static('/novel') 之前（server.js 先 registerRoutes 再挂静态），故能拦在文件下发前。
+  app.use('/novel', (req, res, next) => {
+    try {
+      const raw = String(req.url).split('?')[0];
+      const segs = raw.split('/').filter(Boolean);
+      if (segs.length === 0) return next();                 // /novel, /novel/
+      let uid; try { uid = decodeURIComponent(segs[0]); } catch { uid = segs[0]; }
+      if (!UUID_RE.test(uid)) return next();                // 非用户站，放行
+      const vmap = vipMapForUid(uid);
+      if (Object.keys(vmap).length === 0) return next();    // 该站无 VIP，走静态
+      const cookies = parseCookies(req.headers.cookie);
+      const unlocked = (info) => !!info && cookies['vip_' + info.id] === info.token;
+
+      // ① 站点首页
+      if (segs.length === 1 || (segs.length === 2 && segs[1] === 'index.html')) {
+        const file = path.join(OUT_ROOT, uid, 'index.html');
+        if (!fs.existsSync(file)) return next();
+        let html = fs.readFileSync(file, 'utf8');
+        html = html.replace(/<a\b[^>]*href="[^"]*\/([^/"]+)\/index\.html"[^>]*>[\s\S]*?<\/a>/g, (whole, dirEnc) => {
+          let dir; try { dir = decodeURIComponent(dirEnc); } catch { dir = dirEnc; }
+          const info = vmap[dir];
+          if (!info) return whole;                          // 普通小说，保留
+          return unlocked(info) ? whole : '';               // VIP：未解锁整条移除
+        });
+        res.set('Cache-Control', 'no-store');
+        return res.type('html').send(html);
+      }
+
+      // ② 小说子树（目录页 + 章节页 + 该目录下任意文件）
+      let dir; try { dir = decodeURIComponent(segs[1]); } catch { dir = segs[1]; }
+      const info = vmap[dir];
+      if (info) {
+        res.set('Cache-Control', 'no-store');               // 解锁态也禁缓存，保证每次进入重验
+        if (!unlocked(info)) {
+          return res.status(401).type('html').send(renderVipLockPage(uid, info.id));
+        }
+      }
+      next();
+    } catch { next(); }
   });
 
   // ── 阅读入口：<BASE>/ 必须落到「当前登录用户的作品站」──
@@ -519,6 +724,31 @@ export function registerRoutes(app) {
     const url = sitePath(uid, novelDir, 'index.html');
     const published = fs.existsSync(path.join(OUT_ROOT, rr.novel.user_id, novelDir, 'index.html'));
     res.json({ url, published, title: rr.novel.title });
+  });
+
+  // ── VIP 属性管理 ──
+  app.get('/api/novels/:id/vip', (req, res) => {
+    const rr = resolveNovelForUser(req.params.id, req.user);
+    if (!rr.ok) return res.status(rr.status).json({ error: rr.error });
+    res.json({ vip: store.isVip(rr.novel.id) });
+  });
+  app.put('/api/novels/:id/vip', (req, res) => {
+    const rr = resolveNovelForUser(req.params.id, req.user);
+    if (!rr.ok) return res.status(rr.status).json({ error: rr.error });
+    const password = String(req.body?.password || '').trim();
+    if (!password) return res.status(400).json({ error: '请提供 VIP 密码' });
+    try {
+      store.setVipPassword(rr.novel.id, password, req.user.username);
+      res.json({ ok: true, vip: true });
+    } catch (e) { res.status(400).json({ error: e.message }); }
+  });
+  app.delete('/api/novels/:id/vip', (req, res) => {
+    const rr = resolveNovelForUser(req.params.id, req.user);
+    if (!rr.ok) return res.status(rr.status).json({ error: rr.error });
+    try {
+      store.clearVipPassword(rr.novel.id, req.user.username);
+      res.json({ ok: true, vip: false });
+    } catch (e) { res.status(400).json({ error: e.message }); }
   });
 
   // ── AI 窗口：单轮意图解析 ──

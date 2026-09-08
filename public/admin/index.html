@@ -108,6 +108,12 @@
       <div class="kv" id="setMeta"></div>
     </div>
     <div class="section">
+      <div class="grp-title">🔒 VIP 设置</div>
+      <div class="field"><label>VIP 密码（留空则取消 VIP）</label><input id="vipPassword" type="text" placeholder="设置后读者需输入密码才能阅读"></div>
+      <div class="btns"><button class="mbtn" id="saveVip">💎 保存 VIP 设置</button></div>
+      <div class="kv" id="vipMeta"></div>
+    </div>
+    <div class="section">
       <div class="grp-title">② 生成章节大纲</div>
       <div class="row2">
         <div class="field"><label>章节总数</label><input id="ogTotal" type="number" min="1" value="10"></div>
@@ -269,6 +275,10 @@ async function loadSettings() {
     $('#setMeta').textContent = `版本 ${s.version || 0}`;
     $('#ogTotal').value = s.chapterCount || 10;
     $('#ogMeta').textContent = `共 ${s.chapterCount || 0} 章 · 有大纲 ${s.outlineCount || 0} · 有正文 ${s.bodyCount || 0}`;
+    // 加载 VIP 状态
+    const vip = await api(`/novels/${enc(id)}/vip`);
+    $('#vipMeta').textContent = vip.vip ? '✅ 当前为 VIP 小说' : '未设置 VIP';
+    $('#vipPassword').value = '';
   } catch (e) { showResult('读取设定失败：' + e.message, 'err'); }
 }
 
@@ -280,6 +290,22 @@ $('#saveSettings').onclick = async () => {
     const r = await api(`/novels/${enc(id)}/settings`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: $('#setName').value, outline: $('#setOutline').value, content: $('#setContent').value, preface: $('#setPreface').value }) });
     showResult(`✅ 设定已保存（${r.action}${r.version ? ' v' + r.version : ''}）`, 'ok');
     loadSettings(); reloadNovels();
+  } catch (e) { showResult('❌ ' + e.message, 'err'); }
+};
+
+$('#saveVip').onclick = async () => {
+  const id = requireNovel(); if (!id) return;
+  const pwd = $('#vipPassword').value.trim();
+  showLoading('保存 VIP 设置中…');
+  try {
+    if (pwd) {
+      await api(`/novels/${enc(id)}/vip`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pwd }) });
+      showResult('✅ VIP 已开启，读者需输入密码才能阅读', 'ok');
+    } else {
+      await api(`/novels/${enc(id)}/vip`, { method: 'DELETE' });
+      showResult('✅ VIP 已取消，小说可自由阅读', 'ok');
+    }
+    loadSettings();
   } catch (e) { showResult('❌ ' + e.message, 'err'); }
 };
 

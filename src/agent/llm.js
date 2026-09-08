@@ -64,7 +64,7 @@ class LLM {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': AIBRIDGE_API_KEY },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(timeout || 300000),
+      signal: AbortSignal.timeout(timeout || 600000),
     });
 
     if (!res.ok) {
@@ -80,7 +80,8 @@ class LLM {
     if (!content && data.choices && data.choices[0]) {
       content = data.choices[0].message?.content || data.choices[0].text;
     }
-    return { content: content || '' };
+    const finishReason = data.finish_reason || data.choices?.[0]?.finish_reason || null;
+    return { content: content || '', finishReason };
   }
 }
 

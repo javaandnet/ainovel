@@ -90,6 +90,10 @@ export class WriterTool extends BaseTool {
           type: 'integer',
           description: '章节总数（用于 generateChapterOutlines 操作），默认 10'
         },
+        targetWordCount: {
+          type: 'integer',
+          description: '每章目标字数（用于 saveNovelPlan 存储 及 generate 时校验/续写）。如 2000 表示每章约 2000 字。若未指定则不做字数校验。'
+        },
         modificationType: {
           type: 'string',
           description: '修改类型（用于 updateNovelPlan 操作）',
@@ -131,7 +135,8 @@ export class WriterTool extends BaseTool {
         action = 'generate',
         modifyInstructions = '',
         info,
-        totalChapters = 10
+        totalChapters = 10,
+        targetWordCount = null
       } = args;
 
       // 确定数据库路径：相对文件名统一落到 agent 数据目录（workspace/agents/{agent}/data/），
@@ -249,6 +254,13 @@ export class WriterTool extends BaseTool {
         }
 
         const db = createWriterDB(resolvedDbPath);
+        // 将 targetWordCount 存储到 novel content 字段中（作为结构化标记）
+        if (targetWordCount && info) {
+          const marker = `【每章目标字数：${targetWordCount}】`;
+          if (!String(info.content || '').includes('每章目标字数')) {
+            info.content = (info.content || '') + '\n\n' + marker;
+          }
+        }
         const result = db.saveNovelInfo(info);
         
         // 自动检测：如果数据库中没有章节大纲，自动生成
@@ -1532,6 +1544,10 @@ export class WriterTool extends BaseTool {
    * @param {number} totalChapters - 章节总数
    */
   async generateChapterOutlinesWithLLM(novelInfo, totalChapters) {
+    // 从设定中提取目标字数（如有）
+    const wordCountMatch = String(novelInfo.content || '').match(/【每章目标字数[：:]\s*(\d+)】/);
+    const targetWC = wordCountMatch ? parseInt(wordCountMatch[1], 10) : null;
+
     const prompt = `你是一位专业的小说策划师。请根据以下小说概要，生成详细的章节大纲。
 
 ## 小说名称
@@ -1556,6 +1572,7 @@ ${novelInfo.content ? `## 角色设定与世界观\n${novelInfo.content}` : ''}
 5. 合理分配故事节奏：开端、发展、高潮、结局
 6. 🔴 角色姓名锁死：大纲中提及角色时必须使用设定里给出的名字（如主角、反派、各章导师），
    严禁改名、换昵称或新造主要角色；若设定列有章节推进表，必须逐章按表实写
+${targetWC ? `7. 🔴 每章大纲必须明确标注“本章约 ${targetWC} 字”，以便正文生成器严格执行` : ''}
 
 ## 输出格式
 请严格按照以下 JSON 格式返回（不要包含任何其他内容）：
@@ -2585,7 +2602,12 @@ ${needName
    * @param {Array<string>} [modifyContext.characterRoster] - 原文出现过的角色名清单
    * @param {Object} [continuity] - 新创作模式的连贯上下文（_buildContinuityContext 产出）
    */
-  async generateChapterWithLLM(chapterOutline, fullOutline, chapterNo, modifyContext = null, continuity = null) {
+  async generateChapterWithLLM(chapterOutline, fullOutline, chapterNo, modifyContext = null, continuity = null, targetWordCount = null) {
+    // 从 novelInfo.content 解析字数要求（如用户未显式传入）
+    if (!targetWordCount) {
+      const m = fullOutline?.match(/【每章目标字数[：:]\s*(\d+)】/);
+      if (m) targetWordCount = parseInt(m[1], 10);
+    }
     const isRewrite = !!modifyContext?.originalContent;
 
     // 改写模式追加区块：原文全文 + 角色清单，把人物姓名锁死为硬约束
@@ -2627,7 +2649,7 @@ ${isRewrite
 2. 🔴 人物姓名硬约束：所有角色的名字必须与原文/角色清单完全一致（一字不差），严禁改名、换称呼或新造人名；世界观专有名词同理
 3. 保持与前后章节的连贯性，人物性格、能力与关系不得漂移
 4. 篇幅与原文大致相当，使用生动的描写和对话`
-        : `1. 生成完整的章节内容，字数符合大纲要求
+        : `1. 生成完整的章节内容，字数符合大纲要求${targetWordCount ? `（本章目标约 ${targetWordCount} 字，必须写满不可截断）` : ''}
 2. 🔴 人物姓名硬约束：已出场角色的名字必须与「角色清单/整体设定」完全一致（一字不差），严禁改名、换昵称或为同一角色另起称呼；本章若需首次命名，命名后全书必须统一
 3. 保持与前后章节的连贯性：人物性格、能力、关系与世界观不得漂移
 4. 使用生动的描写和对话`}
@@ -2673,10 +2695,83 @@ ${isRewrite
       progressHub.publish(sessionId, `✅ 第 ${chapterNo} 章正文生成完成，正在保存...`);
     }
 
-    return response.content || 'Error: LLM returned empty response';
+    let content = response.content || '';
+    const finishReason = response.finishReason;
+
+    // 截断检测 + 自动续写：如果模型输出被 maxTokens 截断，尝试续写补全
+    if (targetWordCount && content.length > 0) {
+      const isTruncated = (finishReason === 'length') ||
+        (content.length < targetWordCount * 0.5 && !content.trimEnd().match(/[。！？"]\s*$/));
+      if (isTruncated) {
+        console.log(`⚠️ 第${chapterNo}章被截断（当前${content.length}字/目标${targetWordCount}字，finishReason=${finishReason}），尝试续写...`);
+        if (sessionId) {
+          progressHub.publish(sessionId, `⚠️ 第 ${chapterNo} 章被截断，正在续写补全...`);
+        }
+        content = await this._continueChapterContent(content, chapterNo, targetWordCount, sessionId);
+      }
+    }
+
+    return content || 'Error: LLM returned empty response';
   }
 
-  
+  /**
+   * 章节续写：当输出被截断时，从截断点继续生成剩余内容
+   * @param {string} partialContent - 已生成的部分正文
+   * @param {number} chapterNo - 章节号
+   * @param {number} targetWordCount - 目标字数
+   * @param {string|null} sessionId - 会话ID
+   * @returns {Promise<string>} 补全后的完整正文
+   */
+  async _continueChapterContent(partialContent, chapterNo, targetWordCount, sessionId) {
+    const remaining = targetWordCount - partialContent.length;
+    const maxTokens = Math.min(8192, Math.max(4096, Math.ceil(remaining * 2.5)));
+    const model = this.context?.model || null;
+    const temperature = this.context?.temperature ?? 0.7;
+
+    const prompt = `以下是一章小说的已有内容（被中途截断）。请从截断处继续写下去，完成本章剩余内容。
+
+## 要求
+1. 直接续写，不要重复已有内容，不要加任何解释说明
+2. 保持文风、叙事视角连贯
+3. 本章还需约 ${remaining} 字，请写到一个自然的完结点（以句号/叹号/问号结尾）
+4. 使用 Markdown 格式（段落用空行分隔）
+
+## 已有内容（最后300字）
+...${partialContent.slice(-300)}
+
+请从截断处继续写：`;
+
+    const response = await llm.chat({
+      messages: [
+        { role: 'system', content: '你是一位专业的小说作家，擅长无缝衔接续写。' },
+        { role: 'user', content: prompt }
+      ],
+      model,
+      temperature,
+      maxTokens,
+      think: false
+    });
+
+    const continuation = (response.content || '').trim();
+    if (!continuation) {
+      console.log(`⚠️ 第${chapterNo}章续写返回空，保留原截断内容`);
+      return partialContent;
+    }
+
+    // 拼接：去掉续写开头可能的重复内容
+    const combined = partialContent + '\n\n' + continuation;
+    console.log(`✅ 第${chapterNo}章续写完成：${partialContent.length} → ${combined.length} 字`);
+
+    // 如果续写后仍不足 60% 目标且再次被截断，允许第二次续写
+    if (response.finishReason === 'length' && combined.length < targetWordCount * 0.6) {
+      if (sessionId) {
+        progressHub.publish(sessionId, `⚠️ 第 ${chapterNo} 章仍需补全，第二次续写...`);
+      }
+      return this._continueChapterContent(combined, chapterNo, targetWordCount, sessionId);
+    }
+
+    return combined;
+  }
 
   /**
    * 修改章节内容

@@ -22,6 +22,7 @@
     "express": "^4.21.0",
     "fs-extra": "^11.2.0",
     "marked": "^12.0.0",
-    "msedge-tts": "^2.0.7"
+    "msedge-tts": "^2.0.7",
+    "pinyin-pro": "^3.29.3"
   }
 }

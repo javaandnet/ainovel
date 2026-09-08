@@ -20,6 +20,7 @@ const Client = function () { throw new Error('SSH 发布已在 ainovel 停用，
 import { resolveSkillPath, checkPath } from '../../utils/skillPathResolver.js';
 import { toChineseOrdinal } from '../../utils/chineseNumber.js';
 import { BASE_PATH } from '../../base.js';
+import { generatePinyinData } from '../../reader/pinyin.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -428,15 +429,61 @@ export function sanitizeDirName(name) {
 
 /**
  * 生成站点首页（小说列表页，部署在 <directory>/index.html）
- * @param {Array} novels - 小说列表 [{name, url, updatedText}]
+ *
+ * VIP 策略：VIP 小说在静态页里照常渲染（带徽章 + 可被服务端闸门识别），
+ * 未解锁的读者由服务端闸门（routes.js 的 /novel 前置校验）整条移除后再下发，
+ * 因此非 VIP 用户拿到的 HTML 里根本不包含 VIP 小说链接（列表不可见）。
+ * 右上角「VIP 解锁」按钮提交密码到 /api/reader/vip-unlock，成功后写 cookie 并刷新。
+ * @param {Array} novels - 小说列表 [{name, url, updatedText, vip?, novelId?}]
  * @param {string} siteTitle - 页面标题
+ * @param {Object} [opts] - { uid, basePath }：本站所有者 id（用于解锁按钮）与挂载前缀
  * @returns {string} HTML内容
  */
-function generateSiteIndex(novels, siteTitle = '小说列表') {
+function generateSiteIndex(novels, siteTitle = '小说列表', opts = {}) {
+  const uid = opts.uid || '';
+  const basePath = (opts.basePath != null ? opts.basePath : BASE_PATH) || '';
+
   const novelLinks = novels.length > 0
     ? novels.map(n => `
-        <a href="${n.url}">📖 ${n.name}${n.updatedText ? `<span class="date">${n.updatedText}</span>` : ''}</a>`).join('\n')
+        <a href="${n.url}" data-dir="${n.name}">📖 ${n.name}${n.vip ? '<span class="vip-badge">VIP</span>' : ''}${n.updatedText ? `<span class="date">${n.updatedText}</span>` : ''}</a>`).join('\n')
     : '<p class="empty">暂无已发布的小说</p>';
+
+  // 右上角 VIP 解锁按钮 + 脚本（仅本地站带 uid 时注入；远端静态站不注入）
+  const vipBtn = uid
+    ? `<button id="vipUnlockBtn" class="vip-unlock-btn" data-uid="${uid}" data-base="${basePath}">💎 VIP 解锁</button>`
+    : '';
+  const vipScript = uid
+    ? `
+    (function() {
+      var btn = document.getElementById('vipUnlockBtn');
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        var pwd = window.prompt('请输入 VIP 密码：');
+        if (pwd === null) return;
+        pwd = pwd.trim();
+        if (!pwd) { alert('密码不能为空'); return; }
+        btn.disabled = true;
+        var old = btn.textContent;
+        btn.textContent = '解锁中…';
+        fetch(btn.dataset.base + '/api/reader/vip-unlock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ uid: btn.dataset.uid, password: pwd })
+        })
+        .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, j: j }; }); })
+        .then(function(res) {
+          btn.disabled = false; btn.textContent = old;
+          if (res.ok && res.j && res.j.ok) {
+            if (res.j.unlocked > 0) { location.reload(); }
+            else { alert('密码正确，但没有可解锁的 VIP 小说'); }
+          } else {
+            alert((res.j && res.j.error) || '密码错误');
+          }
+        })
+        .catch(function(e) { btn.disabled = false; btn.textContent = old; alert('网络错误：' + e.message); });
+      });
+    })();` : '';
 
   return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -454,11 +501,34 @@ function generateSiteIndex(novels, siteTitle = '小说列表') {
             background-color: #f5f5f5;
             color: #333;
         }
-        h1 {
-            color: #2c3e50;
+        .site-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
             border-bottom: 3px solid #3498db;
             padding-bottom: 0.5em;
+            margin-bottom: 1em;
         }
+        .site-header h1 {
+            margin: 0;
+            color: #2c3e50;
+        }
+        .vip-unlock-btn {
+            border: none;
+            cursor: pointer;
+            background: linear-gradient(135deg, #f39c12, #e74c3c);
+            color: #fff;
+            font-weight: 700;
+            padding: 10px 18px;
+            border-radius: 20px;
+            font-size: 14px;
+            letter-spacing: 1px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .vip-unlock-btn:disabled { opacity: 0.6; cursor: default; }
         .novel-list {
             background: white;
             padding: 20px;
@@ -476,6 +546,7 @@ function generateSiteIndex(novels, siteTitle = '小说列表') {
             text-decoration: none;
             border-radius: 3px;
             transition: background 0.3s;
+            position: relative;
         }
         .novel-list a:hover {
             background: #2980b9;
@@ -489,13 +560,30 @@ function generateSiteIndex(novels, siteTitle = '小说列表') {
             text-align: center;
             padding: 20px 0;
         }
+        .vip-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #f39c12, #e74c3c);
+            color: #fff;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 10px;
+            margin-left: 8px;
+            letter-spacing: 1px;
+            vertical-align: middle;
+        }
     </style>
 </head>
 <body>
-    <h1>${siteTitle}</h1>
+    <div class="site-header">
+        <h1>${siteTitle}</h1>
+        ${vipBtn}
+    </div>
     <div class="novel-list">
         ${novelLinks}
     </div>
+    <script>${vipScript}
+    </script>
 </body>
 </html>`;
 }
@@ -2047,6 +2135,15 @@ export async function publishNovelLocal(dbPath, outRoot, options = {}) {
     const nextUrl = s < sequence.length - 1 ? sequence[s + 1].filename : null;
     const navHtml = buildChapterNav(prevUrl, nextUrl);
     let htmlContent = markdownToHtml(page.markdown, page.title, navHtml);
+    // 发布时预生成拼音数据，嵌入 reader-data，前端拼音模式零延迟启动
+    if (page.kind === 'chapter') {
+      try {
+        const pyData = generatePinyinData(page.chapterText || page.markdown);
+        if (pyData.length > 0) {
+          htmlContent = injectReaderData(htmlContent, { pinyin: pyData });
+        }
+      } catch { /* 拼音生成失败不阻断发布 */ }
+    }
     // 发布时预生成章节测试并内嵌：读者端打开测试零 LLM、即时呈现；失败则回退按需生成，绝不阻断发布
     if (page.kind === 'chapter' && typeof options.generateQuiz === 'function') {
       try {
@@ -2100,15 +2197,17 @@ export async function publishNovelLocal(dbPath, outRoot, options = {}) {
  * @param {Array<{dirName:string,title:string,chapterCount:number}>} novels
  * @param {string} outRoot
  */
-export function publishSiteIndexLocal(novels, outRoot, urlBase = BASE_PATH) {
+export function publishSiteIndexLocal(novels, outRoot, urlBase = BASE_PATH, uid = '') {
   fs.mkdirSync(outRoot, { recursive: true });
-  // generateSiteIndex 消费字段：name / url / updatedText
+  // generateSiteIndex 消费字段：name / url / updatedText / vip / novelId
   const items = novels.map((n) => ({
     name: n.title || n.name,
     url: `${String(urlBase).replace(/\/+$/, '')}/${n.dirName}/index.html`,
-    updatedText: (n.chapterCount != null ? `${n.chapterCount} 章` : '')
+    updatedText: (n.chapterCount != null ? `${n.chapterCount} 章` : ''),
+    vip: !!n.vip,
+    novelId: n.novelId || null
   }));
-  const html = generateSiteIndex(items, '小说列表');
+  const html = generateSiteIndex(items, '小说列表', { uid, basePath: urlBase });
   fs.writeFileSync(path.join(outRoot, 'index.html'), html, 'utf-8');
   return { indexUrl: `${String(urlBase).replace(/\/+$/, '')}/index.html`, count: items.length };
 }
