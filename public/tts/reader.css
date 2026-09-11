@@ -339,82 +339,46 @@
     line-height: 2.4;
 }
 
-/* ===== VIP 锁定遮罩 ===== */
-.vip-overlay {
+/* ===== 桌面端左右翻页箭头 ===== */
+/* 触屏读者靠滑动 + 方向键已经够了，把箭头常驻两侧只会压住正文，
+   故只在「能悬停 + 精确指针」（桌面）时显示；判定交给媒体特性，
+   平板接上鼠标也会自动出现，不必做 UA 嗅探。 */
+.page-arrow {
+    display: none;
     position: fixed;
-    inset: 0;
-    z-index: 9999;
-    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-    display: flex;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 998;
+    width: 44px;
+    height: 72px;
     align-items: center;
     justify-content: center;
-    padding: 20px;
-}
-.vip-card {
-    background: rgba(255, 255, 255, 0.05);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 20px;
-    padding: 40px 30px;
-    text-align: center;
-    max-width: 360px;
-    width: 100%;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-}
-.vip-icon {
-    font-size: 48px;
-    margin-bottom: 16px;
-}
-.vip-card h2 {
-    color: #f39c12;
-    font-size: 22px;
-    margin-bottom: 8px;
-    font-weight: 700;
-}
-.vip-card p {
-    color: #bdc3c7;
-    font-size: 14px;
-    margin-bottom: 20px;
-    line-height: 1.5;
-}
-.vip-card input {
-    width: 100%;
-    padding: 14px 16px;
-    border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    background: rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    background: rgba(44, 62, 80, 0.55);
     color: #ecf0f1;
-    font-size: 16px;
-    outline: none;
-    margin-bottom: 14px;
-    box-sizing: border-box;
-    transition: border-color 0.2s;
+    font-size: 28px;
+    line-height: 1;
+    text-decoration: none;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+    opacity: 0.55;
+    transition: opacity 0.18s, background 0.18s;
+    -webkit-user-select: none;
+    user-select: none;
 }
-.vip-card input:focus {
-    border-color: #f39c12;
+.page-arrow:hover {
+    opacity: 1;
+    background: rgba(52, 152, 219, 0.9);
 }
-.vip-card button {
-    width: 100%;
-    padding: 14px;
-    border-radius: 12px;
-    border: none;
-    background: linear-gradient(135deg, #f39c12, #e74c3c);
-    color: #fff;
-    font-size: 16px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: opacity 0.2s;
+.page-arrow.prev { left: 10px; }
+.page-arrow.next { right: 10px; }
+/* 已是第一章 / 最后一章：置灰但仍占位，避免翻到头时另一侧箭头突然换位 */
+.page-arrow.off {
+    opacity: 0.18;
+    pointer-events: none;
 }
-.vip-card button:hover {
-    opacity: 0.9;
+@media (hover: hover) and (pointer: fine) {
+    .page-arrow { display: flex; }
 }
-.vip-card button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-.vip-error {
-    display: none;
-    color: #e74c3c;
-    font-size: 13px;
-    margin-top: 12px;
+@media (prefers-reduced-motion: reduce) {
+    .page-arrow { transition: none; }
 }

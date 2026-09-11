@@ -12,6 +12,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { registerRoutes } from './src/routes.js';
 import { bootstrap } from './src/auth/userStore.js';
+import { initBridge } from './src/services/bridgeStore.js';
 import { BASE_PATH, APP_NAMESPACES } from './src/base.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -37,6 +38,9 @@ app.use((req, _res, next) => {
 // 初始化多用户元数据库（幂等：建表 + 播种 + 存量迁移）
 const boot = bootstrap();
 
+// 把控制台选的桥接密钥推给 llm（必须早于任何生成请求，否则静默用 .env）
+const bridge = initBridge();
+
 // API
 registerRoutes(app);
 
@@ -55,5 +59,5 @@ app.listen(PORT, () => {
   console.log(`   管理页面: http://localhost:${PORT}${BASE_PATH}/admin/`);
   console.log(`   阅读入口: http://localhost:${PORT}${BASE_PATH}/`);
   console.log(`   账号: 播种 ${boot.seeded} 个 / 存量小说登记 ${boot.migrated} 本`);
-  console.log(`   LLM: aibridge (默认 Local/Qwen3.8，可用 AIBRIDGE_API_KEY / NOVEL_LLM_MODEL 覆盖)`);
+  console.log(`   LLM: ${bridge.url} ← ${bridge.source === 'console' ? `控制台「${bridge.activeName}」` : '.env / 环境变量'}（上游模型见上面 [bridge] 行，可用 NOVEL_LLM_MODEL 指定）`);
 });

@@ -35,7 +35,14 @@
   .utable button.pw { border-color:#2472a4; color:#7fc4f0; }
   .pill { font-size:11px; padding:2px 7px; border-radius:10px; }
   .pill.on { background:#1e4620; color:#27ae60; } .pill.off { background:#4a1e1e; color:#e74c3c; }
+  .pill.vip { background:#4a3a12; color:#f1c40f; }
   .self { font-size:10px; color:#f39c12; margin-left:4px; }
+  .tip { font-size:12px; color:#7f8c8d; line-height:1.7; margin:-2px 0 12px; }
+  .kv { font-size:13px; color:#ecf0f1; line-height:1.8; background:#0f1419; border:1px solid #2c3e50; border-radius:8px; padding:9px 11px; word-break:break-all; }
+  .kv .sub { display:block; font-size:11px; color:#7f8c8d; }
+  code.kp { font-size:12px; color:#95a5a6; }
+  .pill.net { background:#4a3a12; color:#f1c40f; }
+  .mbtn.act { border-color:#27ae60; color:#27ae60; }
   .toast { position:fixed; left:50%; bottom:30px; transform:translateX(-50%); background:#2c3e50; color:#ecf0f1; padding:11px 18px; border-radius:22px; font-size:14px; box-shadow:0 4px 16px rgba(0,0,0,.4); opacity:0; transition:opacity .2s; pointer-events:none; z-index:300; max-width:88vw; }
   .toast.show { opacity:1; } .toast.err { background:#7c2d2d; }
   .loading { text-align:center; color:#7f8c8d; padding:24px; }
@@ -55,6 +62,7 @@
     <div class="card"><div class="num" id="cUsers">–</div><div class="lbl">用户总数</div></div>
     <div class="card"><div class="num" id="cDisabled">–</div><div class="lbl">已禁用</div></div>
     <div class="card"><div class="num" id="cNovels">–</div><div class="lbl">小说总数</div></div>
+    <div class="card"><div class="num" id="cVip">–</div><div class="lbl">VIP 授权</div></div>
   </div>
 </div>
 
@@ -71,6 +79,41 @@
 <div class="section">
   <div class="grp-title">用户列表</div>
   <div class="tablewrap"><div id="usersBox"><div class="loading">加载中…</div></div></div>
+</div>
+
+<div class="section" id="vip">
+  <div class="grp-title">💎 VIP 读者授权</div>
+  <div class="tip">VIP 不再用共享密码：先把某本书标为 VIP（小说管理页 ① 下方），再在这里把读者账号加进名单。
+    未登录或无授权的读者在站点首页看不到 VIP 书，直接撞 URL 也只会拿到无权页；撤销/到期当场生效。</div>
+  <div class="row2">
+    <div class="field"><label>读者账号</label><select id="gvUser"></select></div>
+    <div class="field"><label>可读范围</label><select id="gvNovel"><option value="">全站 VIP（所有 VIP 书）</option></select></div>
+  </div>
+  <div class="row2">
+    <div class="field"><label>有效天数（留空 = 长期）</label><input id="gvDays" type="number" min="1" placeholder="如 30"></div>
+    <div class="field"><label>备注（谁批的 / 为什么）</label><input id="gvNote" autocomplete="off"></div>
+  </div>
+  <div class="btns"><button class="mbtn primary" id="gvGo">➕ 授予 / 续期</button></div>
+  <div class="tablewrap" style="margin-top:12px"><div id="vipBox"><div class="loading">加载中…</div></div></div>
+</div>
+
+<div class="section" id="bridge">
+  <div class="grp-title">🔌 推理服务连接（aibridge API Key）</div>
+  <div class="tip">大纲与正文都经 aibridge 桥接生成。这里可存多条 Key 并启用其中一条，<b>切换即时生效、不用重启</b>；
+    全部停用则回落 <code>.env</code> 的 AIBRIDGE_API_KEY。列表只显前缀，明文只存在服务端
+    <code>data/system/bridge.json</code>（0600）。不同 Key 背后往往是不同模型，生成快慢能差十几倍；
+    标了「⚠公网」的那条会把稿子发到外部服务。</div>
+  <div class="field"><label>当前生效</label><div id="bgCurrent" class="kv">加载中…</div></div>
+  <div class="field"><label>桥接地址（留空 = 用 .env 的 AIBRIDGE_URL）</label>
+    <div class="row2"><div class="field"><input id="bgUrl" placeholder="http://localhost:3300/api/bridge/chat" autocomplete="off"></div></div>
+    <div class="btns"><button class="mbtn" id="bgSaveUrl">💾 保存地址</button><button class="mbtn" id="bgClearUrl">清除覆盖</button><button class="mbtn" id="bgPing">🔍 测桥接服务</button></div>
+  </div>
+  <div class="row2">
+    <div class="field"><label>名称（自己看的，如「快模型」「本地慢模型」）</label><input id="bkName" autocomplete="off"></div>
+    <div class="field"><label>API Key（abk_…）</label><input id="bkKey" type="password" autocomplete="off"></div>
+  </div>
+  <div class="btns"><button class="mbtn primary" id="bkAdd">➕ 保存并测试</button></div>
+  <div class="tablewrap" style="margin-top:12px"><div id="bgBox"><div class="loading">加载中…</div></div></div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -112,7 +155,13 @@ async function boot() {
   $('#logoutBtn').onclick = async () => { try { await fetch(BASE + '/api/logout', { method: 'POST' }); } catch {} location.replace(BASE + '/login/'); };
   $('#novelsBtn').onclick = () => { location.href = BASE + '/admin/'; };
   $('#addUser').onclick = addUser;
+  $('#gvGo').onclick = grantVip;
+  bindBridge();
   loadUsers();
+  loadVip();
+  loadBridge();
+  const anchor = location.hash === '#vip' ? '#vip' : location.hash === '#bridge' ? '#bridge' : null;
+  if (anchor) { const el = $(anchor); if (el) el.scrollIntoView(); }
 }
 
 async function loadUsers() {
@@ -161,6 +210,177 @@ async function resetPw(id, name) {
 
 async function toggleUser(id, disabled) {
   try { await api(`/admin/users/${enc(id)}/disable`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disabled }) }); toast(disabled ? '已禁用' : '已启用'); loadUsers(); }
+  catch (e) { toast('❌ ' + e.message, true); }
+}
+
+// ── VIP 读者授权（一张名单说了算）──
+let VIPNOVELS = [];
+const GSTATUS = { active: '<span class="pill on">有效</span>', expired: '<span class="pill off">已到期</span>', revoked: '<span class="pill off">已撤销</span>' };
+
+async function loadVip() {
+  try {
+    const r = await api('/admin/vip');
+    const grants = r.grants || [];
+    VIPNOVELS = r.vipNovels || [];
+    const users = r.users || [];
+    $('#cVip').textContent = grants.filter(g => g.active).length;
+    $('#gvUser').innerHTML = users.map(u => `<option value="${enc(u.id)}">${escapeHtml(u.username)}${u.role === 'superadmin' ? '（超管）' : ''}</option>`).join('')
+      || '<option value="">（暂无用户）</option>';
+    $('#gvNovel').innerHTML = '<option value="">全站 VIP（所有 VIP 书）</option>'
+      + VIPNOVELS.map(n => `<option value="${enc(n.id)}">${escapeHtml(n.title || '未命名')}（${n.chapterCount || 0} 章）</option>`).join('');
+    const rows = grants.map(g => `<tr>
+      <td class="u">${escapeHtml(g.username || '—')}</td>
+      <td class="u">${g.scope === 'all' ? '全站 VIP' : escapeHtml(g.novelTitle || '（书已删除）')}</td>
+      <td>${GSTATUS[g.status] || escapeHtml(g.status)}</td>
+      <td>${g.expiresAt ? fmtLogin(g.expiresAt) : '长期'}</td>
+      <td class="u" style="max-width:140px;white-space:normal">${escapeHtml(g.note || '')}</td>
+      <td><button data-gr="${g.id}" data-op="${g.revokedAt ? 'restore' : 'revoke'}">${g.revokedAt ? '恢复' : '撤销'}</button></td>
+    </tr>`).join('');
+    $('#vipBox').innerHTML = `<table class="utable"><thead><tr><th>读者</th><th>范围</th><th>状态</th><th>到期</th><th>备注</th><th>操作</th></tr></thead><tbody>${rows || '<tr><td colspan="6">尚无授权记录</td></tr>'}</tbody></table>`;
+    $('#vipBox').querySelectorAll('button[data-gr]').forEach(b => b.onclick = () => opGrant(b.dataset.gr, b.dataset.op));
+  } catch (e) { toast('VIP 名单加载失败：' + e.message, true); }
+}
+
+async function grantVip() {
+  const userId = $('#gvUser').value;
+  if (!userId) return toast('先选读者账号', true);
+  const days = $('#gvDays').value ? Number($('#gvDays').value) : null;
+  if (days !== null && (!Number.isFinite(days) || days <= 0)) return toast('天数需大于 0', true);
+  try {
+    await api('/admin/vip/grant', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, novelId: $('#gvNovel').value || null, days, note: $('#gvNote').value.trim() }),
+    });
+    $('#gvDays').value = ''; $('#gvNote').value = '';
+    toast('✅ 授权已保存'); loadVip();
+  } catch (e) { toast('❌ ' + e.message, true); }
+}
+
+async function opGrant(id, op) {
+  if (op === 'revoke' && !confirm('撤销后该读者立刻读不到本书（正在看的页面刷新即失效）。继续？')) return;
+  try {
+    await api(`/admin/vip/${enc(id)}${op === 'restore' ? '/restore' : ''}`, { method: op === 'restore' ? 'POST' : 'DELETE' });
+    toast(op === 'revoke' ? '已撤销' : '已恢复'); loadVip();
+  } catch (e) { toast('❌ ' + e.message, true); }
+}
+
+// ── 推理服务连接：切换 aibridge 的哪条 Key（运行时生效）──
+let BG = { keys: [] };
+
+// providerType 特意带回来的：ollama_remote 意味着稿子要出公网，与自建不是一个风险级别
+function probeText(p) {
+  if (!p) return '<span style="color:#7f8c8d">未测试</span>';
+  if (!p.ok) return `<span class="pill off">✗ ${escapeHtml(p.detail || '失败')}</span>`;
+  const chain = [p.provider, p.model].filter(Boolean).join(' / ') || p.keyName || '已连通';
+  const net = p.providerType === 'ollama_remote' ? ' <span class="pill net">⚠公网</span>' : '';
+  return `<span class="pill on">✓ ${escapeHtml(chain)}</span>${net}`;
+}
+
+function renderBridgeCurrent() {
+  const c = BG.current || {};
+  const idn = c.identity && c.identity.ok ? ` → ${escapeHtml([c.identity.provider, c.identity.model].filter(Boolean).join(' / '))}` : '';
+  const head = c.source === 'console'
+    ? `控制台选中：「${escapeHtml(c.activeName || '?')}」${idn}`
+    : `回落 .env / 环境变量${c.keyPrefix ? ` <code class="kp">${escapeHtml(c.keyPrefix)}</code>` : ''}`;
+  const noKey = c.hasKey ? '' : ' <span class="pill off">无可用密钥，生成会失败</span>';
+  // 「来源」只说密钥从哪来；地址可被单独覆盖，不标出来会把「覆盖过的地址」读成「.env 里的地址」
+  const urlTag = BG.urlOverride ? ' <span class="pill on">地址已被控制台覆盖</span>' : '';
+  $('#bgCurrent').innerHTML = `${head}${noKey}<span class="sub">${escapeHtml(c.url || '')}${urlTag}</span>`;
+  // 已存过覆盖地址要回填，否则输入框空着，看不出「这条是覆盖值」
+  if (!$('#bgUrl').value && BG.urlOverride) $('#bgUrl').value = BG.urlOverride;
+  if (!$('#bgUrl').value) $('#bgUrl').placeholder = c.url || 'http://localhost:3300/api/bridge/chat';
+}
+
+async function loadBridge() {
+  try {
+    BG = await api('/admin/bridge');
+    renderBridgeCurrent();
+    const rows = (BG.keys || []).map(k => `<tr>
+      <td class="u">${escapeHtml(k.name)}${k.id === BG.activeId ? '<span class="self">（生效中）</span>' : ''}</td>
+      <td><code class="kp">${escapeHtml(k.prefix)}</code></td>
+      <td>${probeText(k.probe)}${k.probe?.at ? `<span class="sub">测试于 ${fmtLogin(k.probe.at)}</span>` : ''}</td>
+      <td>${k.id === BG.activeId
+        ? `<button data-off="${k.id}">停用</button>`
+        : `<button class="act" data-on="${k.id}">启用</button>`}</td>
+      <td><button data-ts="${k.id}">测试</button></td>
+      <td><button data-rn="${k.id}" data-name="${escapeHtml(k.name)}">改名</button></td>
+      <td><button data-rm="${k.id}" data-name="${escapeHtml(k.name)}">删除</button></td>
+    </tr>`).join('');
+    $('#bgBox').innerHTML = `<table class="utable"><thead><tr><th>名称</th><th>Key 前缀</th><th>连到</th><th>启用</th><th>测试</th><th>改名</th><th>删除</th></tr></thead><tbody>${rows || '<tr><td colspan="7">还没配过 Key：生成暂用 .env 里那条</td></tr>'}</tbody></table>`;
+    const box = $('#bgBox');
+    box.querySelectorAll('button[data-on]').forEach(b => b.onclick = () => activeBridgeKey(b.dataset.on, true));
+    box.querySelectorAll('button[data-off]').forEach(b => b.onclick = () => activeBridgeKey(b.dataset.off, false));
+    box.querySelectorAll('button[data-ts]').forEach(b => b.onclick = () => testBridgeKey(b.dataset.ts));
+    box.querySelectorAll('button[data-rn]').forEach(b => b.onclick = () => renameBridgeKey(b.dataset.rn, b.dataset.name));
+    box.querySelectorAll('button[data-rm]').forEach(b => b.onclick = () => removeBridgeKey(b.dataset.rm, b.dataset.name));
+  } catch (e) { toast('连接配置加载失败：' + e.message, true); }
+}
+
+function bindBridge() {
+  $('#bkAdd').onclick = addBridgeKey;
+  $('#bgPing').onclick = async () => {
+    $('#bgPing').disabled = true;
+    try { const r = await api('/admin/bridge/ping', { method: 'POST' }); toast(r.ok ? `✅ ${r.detail}` : `❌ ${r.detail}`, !r.ok); }
+    catch (e) { toast('❌ ' + e.message, true); }
+    finally { $('#bgPing').disabled = false; }
+  };
+  $('#bgSaveUrl').onclick = () => setBridgeUrl($('#bgUrl').value.trim());
+  $('#bgClearUrl').onclick = () => setBridgeUrl('');
+}
+
+async function addBridgeKey() {
+  const name = $('#bkName').value.trim(), key = $('#bkKey').value.trim();
+  if (!name || !key) return toast('名称与 Key 必填', true);
+  $('#bkAdd').disabled = true;
+  try {
+    const r = await api('/admin/bridge/keys', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, key }) });
+    $('#bkName').value = ''; $('#bkKey').value = '';
+    const p = r.probe;
+    toast(p ? (p.ok ? `✅ 已保存：${[p.provider, p.model].filter(Boolean).join(' / ') || '已连通'}` : `已保存，但测试失败：${p.detail}`) : '✅ 已保存', !!p && !p.ok);
+    loadBridge();
+  } catch (e) { toast('❌ ' + e.message, true); }
+  finally { $('#bkAdd').disabled = false; }
+}
+
+async function activeBridgeKey(id, on) {
+  try {
+    await api(`/admin/bridge/keys/${enc(id)}/active`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active: on }) });
+    toast(on ? '✅ 已切换，后续生成立即走这条 Key' : '已停用，回落 .env');
+    loadBridge();
+  } catch (e) { toast('❌ ' + e.message, true); }
+}
+
+async function testBridgeKey(id) {
+  const btn = $('#bgBox').querySelector(`button[data-ts="${id}"]`);
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api(`/admin/bridge/keys/${enc(id)}/test`, { method: 'POST' });
+    const p = r.probe || {};
+    toast(p.ok ? `✅ ${[p.provider, p.model].filter(Boolean).join(' / ') || '已连通'}${p.providerType === 'ollama_remote' ? '（走公网）' : ''}` : `❌ ${p.detail || '测试失败'}`, !p.ok);
+    loadBridge();
+  } catch (e) { toast('❌ ' + e.message, true); }
+  finally { if (btn) btn.disabled = false; }
+}
+
+async function renameBridgeKey(id, old) {
+  const name = prompt('新名称：', old);
+  if (name === null || !name.trim() || name.trim() === old) return;
+  try { await api(`/admin/bridge/keys/${enc(id)}/name`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) }); toast('已改名'); loadBridge(); }
+  catch (e) { toast('❌ ' + e.message, true); }
+}
+
+async function removeBridgeKey(id, name) {
+  // 这里用普通确认就够：删掉的只是本地存的连接条目，桥接侧的 Key 还在，重新录入即可
+  if (!confirm(`删除「${name}」这条连接配置？只影响本地记录，不会动桥接服务上的 Key。`)) return;
+  try {
+    const r = await api(`/admin/bridge/keys/${enc(id)}`, { method: 'DELETE' });
+    toast(r.wasActive ? '已删除（原先生效项已停用，回落 .env）' : '已删除');
+    loadBridge();
+  } catch (e) { toast('❌ ' + e.message, true); }
+}
+
+async function setBridgeUrl(url) {
+  try { await api('/admin/bridge/url', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) }); toast(url ? '✅ 地址已更新' : '已清除覆盖，回落 .env'); loadBridge(); }
   catch (e) { toast('❌ ' + e.message, true); }
 }
 

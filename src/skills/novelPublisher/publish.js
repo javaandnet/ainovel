@@ -21,6 +21,7 @@ import { resolveSkillPath, checkPath } from '../../utils/skillPathResolver.js';
 import { toChineseOrdinal } from '../../utils/chineseNumber.js';
 import { BASE_PATH } from '../../base.js';
 import { generatePinyinData } from '../../reader/pinyin.js';
+import { htmlToText } from '../../utils/textDiff.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,6 +39,14 @@ function buildChapterNav(prevUrl, nextUrl) {
   if (nextUrl) links.push(`<a href="${nextUrl}">下一章 →</a>`);
   return `<div class="chapter-nav">${links.join('\n            ')}</div>`;
 }
+
+/**
+ * 占位章节页正文：中间章（如 11–15）尚未生成时补出的「本章尚未完成」页。
+ * 有了占位页，章节序列连续，按位置编号（i+1）与数据库原始章号自然对齐：
+ *   读者从第 10 章点「下一章」会先到「第 11 章（未完成）」，而不是直接翻到第 16 章剧情断裂。
+ * .tts-skip 使朗读模式跳过占位正文（仍读大标题），与分部 kicker 同一约定。
+ */
+const PLACEHOLDER_BODY = `<p class="chapter-placeholder tts-skip">本章尚未完成，作者还在创作中。请返回目录查看已有章节，或稍后再来阅读。</p>`;
 
 /**
  * 去除标题中的"第X章"前缀，返回纯标题文本
@@ -222,6 +231,17 @@ function markdownToHtml(markdown, title = '小说', navHtml = '') {
             color: #7f8c8d;
             letter-spacing: 0.02em;
         }
+        /* 占位章正文（本章尚未完成）：虚线框 + 置灰，与真正文区分 */
+        .chapter-placeholder {
+            text-indent: 0;
+            margin: 2em auto;
+            padding: 1.4em 1.2em;
+            text-align: center;
+            color: #7f8c8d;
+            background: #f4f6f7;
+            border: 1px dashed #bdc3c7;
+            border-radius: 6px;
+        }
     </style>
 </head>
 <body>
@@ -246,8 +266,16 @@ function generateIndex(chapters, novelTitle = '小说', extras = {}) {
   const prefaceUrl = extras.prefaceUrl || null;
   const parts = Array.isArray(extras.parts) ? extras.parts : [];
 
-  const chapterLink = (ch) => `
-        <a class="chapter-link" href="${ch.url}">${ch.title || `第${ch.chapterNum || ''}章`}</a>`;
+  const chapterLink = (ch) => {
+    const text = ch.title || `第${ch.chapterNum || ''}章`;
+    // 占位章（中间章未生成）在目录里标灰并附「未完成」，让缺口一目了然
+    if (ch.isPlaceholder) {
+      return `
+        <a class="chapter-link chapter-todo" href="${ch.url}">${text}<span class="todo-tag">未完成</span></a>`;
+    }
+    return `
+        <a class="chapter-link" href="${ch.url}">${text}</a>`;
+  };
 
   const prefaceEntry = prefaceUrl
     ? `
@@ -329,6 +357,25 @@ function generateIndex(chapters, novelTitle = '小说', extras = {}) {
         .chapter-list a.chapter-link:hover,
         .part-links a.chapter-link:hover {
             background: #2980b9;
+        }
+        /* 占位章（未完成）：标灰，附一个「未完成」小标签，让缺口在目录里可见 */
+        .chapter-list a.chapter-link.chapter-todo,
+        .part-links a.chapter-link.chapter-todo {
+            background: #bdc3c7;
+            color: #ffffff;
+        }
+        .chapter-list a.chapter-link.chapter-todo:hover,
+        .part-links a.chapter-link.chapter-todo:hover {
+            background: #a9abb0;
+        }
+        .chapter-link .todo-tag {
+            float: right;
+            font-size: 0.78em;
+            font-weight: normal;
+            opacity: 0.9;
+            background: rgba(0,0,0,0.14);
+            padding: 1px 8px;
+            border-radius: 10px;
         }
         .preface-link {
             display: block;
@@ -440,51 +487,14 @@ export function sanitizeDirName(name) {
  * @returns {string} HTML内容
  */
 function generateSiteIndex(novels, siteTitle = '小说列表', opts = {}) {
-  const uid = opts.uid || '';
-  const basePath = (opts.basePath != null ? opts.basePath : BASE_PATH) || '';
-
   const novelLinks = novels.length > 0
     ? novels.map(n => `
         <a href="${n.url}" data-dir="${n.name}">📖 ${n.name}${n.vip ? '<span class="vip-badge">VIP</span>' : ''}${n.updatedText ? `<span class="date">${n.updatedText}</span>` : ''}</a>`).join('\n')
     : '<p class="empty">暂无已发布的小说</p>';
 
-  // 右上角 VIP 解锁按钮 + 脚本（仅本地站带 uid 时注入；远端静态站不注入）
-  const vipBtn = uid
-    ? `<button id="vipUnlockBtn" class="vip-unlock-btn" data-uid="${uid}" data-base="${basePath}">💎 VIP 解锁</button>`
-    : '';
-  const vipScript = uid
-    ? `
-    (function() {
-      var btn = document.getElementById('vipUnlockBtn');
-      if (!btn) return;
-      btn.addEventListener('click', function() {
-        var pwd = window.prompt('请输入 VIP 密码：');
-        if (pwd === null) return;
-        pwd = pwd.trim();
-        if (!pwd) { alert('密码不能为空'); return; }
-        btn.disabled = true;
-        var old = btn.textContent;
-        btn.textContent = '解锁中…';
-        fetch(btn.dataset.base + '/api/reader/vip-unlock', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin',
-          body: JSON.stringify({ uid: btn.dataset.uid, password: pwd })
-        })
-        .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, j: j }; }); })
-        .then(function(res) {
-          btn.disabled = false; btn.textContent = old;
-          if (res.ok && res.j && res.j.ok) {
-            if (res.j.unlocked > 0) { location.reload(); }
-            else { alert('密码正确，但没有可解锁的 VIP 小说'); }
-          } else {
-            alert((res.j && res.j.error) || '密码错误');
-          }
-        })
-        .catch(function(e) { btn.disabled = false; btn.textContent = old; alert('网络错误：' + e.message); });
-      });
-    })();` : '';
-
+  // VIP 站点首页不再注入「VIP 密码解锁」按钮：VIP 已改为读者账号授权制，
+  // 未授权读者看不到的 VIP 条目由服务端 /novel 闸门整条移除（见 routes.js），
+  // 条目可见即代表已授权，读者端不需要任何解锁动作。
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -514,21 +524,6 @@ function generateSiteIndex(novels, siteTitle = '小说列表', opts = {}) {
             margin: 0;
             color: #2c3e50;
         }
-        .vip-unlock-btn {
-            border: none;
-            cursor: pointer;
-            background: linear-gradient(135deg, #f39c12, #e74c3c);
-            color: #fff;
-            font-weight: 700;
-            padding: 10px 18px;
-            border-radius: 20px;
-            font-size: 14px;
-            letter-spacing: 1px;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
-            white-space: nowrap;
-            flex-shrink: 0;
-        }
-        .vip-unlock-btn:disabled { opacity: 0.6; cursor: default; }
         .novel-list {
             background: white;
             padding: 20px;
@@ -577,13 +572,10 @@ function generateSiteIndex(novels, siteTitle = '小说列表', opts = {}) {
 <body>
     <div class="site-header">
         <h1>${siteTitle}</h1>
-        ${vipBtn}
     </div>
     <div class="novel-list">
         ${novelLinks}
     </div>
-    <script>${vipScript}
-    </script>
 </body>
 </html>`;
 }
@@ -640,25 +632,40 @@ async function readChaptersFromDb(dbPath) {
     ).all();
     db.close();
 
-    const chapters = rows
-      .filter(r => r.content && String(r.content).trim())
-      .map(r => {
-        const title = r.name || `第${r.no}章`;
-        // content 列不存储章节标题，始终剥离正文开头已有的标题行
-        // 标题由 HTML 生成时从 name + 序号动态拼接，避免追加/插入章节后序号错乱
-        const content = stripLeadingHeading(r.content);
-        return {
-          file: `${path.basename(dbPath)}#${r.no}`,
-          content,
-          chapterNum: r.no,
-          title,
-          partNo: Number(r.part_no) || 0, // 归属的部序号，0 = 未分部
-          id: r.id // 稳定章节ID，用作发布文件名，不随重排变化
-        };
-      });
+    // 补洞：从第 1 章到最后一个「有正文」的章号，逐章号构建连续序列。
+    // 中间缺正文的章（空行或整行不存在）补成占位页（isPlaceholder），
+    //   使按位置编号（i+1）与数据库原始章号自然对齐——第 16 章仍显示为第 16 章，
+    //   读者能看见 11–15 的缺口与「本章尚未完成」，而不是从第 10 章直接翻到 16 章剧情断裂。
+    // 尾部连续空章（最后一个有正文章号之后）不补：那是尚未写到的进度，不该出现在成品里。
+    const rowByNo = new Map(rows.map((r) => [Number(r.no), r]));
+    const contentRows = rows.filter((r) => r.content && String(r.content).trim());
+    if (contentRows.length === 0) return [];
+    const ceiling = Number(contentRows[contentRows.length - 1].no);
 
+    const chapters = [];
+    for (let no = 1; no <= ceiling; no++) {
+      const r = rowByNo.get(no);
+      const hasBody = !!(r && r.content && String(r.content).trim());
+      const title = (r && r.name) || `第${no}章`;
+      // content 列不存储章节标题，有正文时始终剥离正文开头已有的标题行
+      // 标题由 HTML 生成时从 name + 序号动态拼接，避免追加/插入章节后序号错乱
+      const content = hasBody ? stripLeadingHeading(r.content) : '';
+      // 占位章也必须有稳定文件名：有行则复用行 id，整行缺失时用确定性哈希兜底
+      const id = (r && r.id) || crypto.createHash('md5').update(`${dbPath}#ph#${no}`).digest('hex').slice(0, 16);
+      chapters.push({
+        file: `${path.basename(dbPath)}#${no}`,
+        content,
+        chapterNum: no,
+        title,
+        partNo: Number(r && r.part_no) || 0, // 归属的部序号，0 = 未分部
+        id, // 稳定章节ID，用作发布文件名，不随重排变化
+        isPlaceholder: !hasBody,
+      });
+    }
+
+    const phCount = chapters.filter((c) => c.isPlaceholder).length;
     if (chapters.length > 0) {
-      console.log(`✅ 从数据库读取到 ${chapters.length} 个章节: ${dbPath}`);
+      console.log(`✅ 从数据库读取到 ${chapters.length} 个章节（含 ${phCount} 章未完成的占位）: ${dbPath}`);
     }
     return chapters;
   } catch (error) {
@@ -756,6 +763,7 @@ function buildPartViews(parts, chapters) {
  */
 async function readChapterFiles(sessionDir, dbPath) {
   const chapters = [];
+  const presentByNum = new Map(); // 章号 → 实际读到的文件（含空文件），用于补洞时区分缺口与有正文
   
   try {
     const files = fs.readdirSync(sessionDir);
@@ -778,20 +786,41 @@ async function readChapterFiles(sessionDir, dbPath) {
       const titleMatch = content.match(/^#\s+(.+)$/m);
       const title = titleMatch ? titleMatch[1] : `第${chapterNum}章`;
       
-      chapters.push({
+      presentByNum.set(chapterNum, {
         file,
         content,
         chapterNum,
-        title
+        title,
+        isPlaceholder: !(content && content.trim())
       });
     }
-    
-    console.log(`✅ 找到 ${chapters.length} 个章节文件`);
 
-    // 🔧 回退：无 markdown 章节文件时，从小说数据库读取（novelWriter 现行存储方式）
-    if (chapters.length === 0) {
+    // 无 markdown 章节文件时，回退从小说数据库读取（novelWriter 现行存储方式）
+    if (presentByNum.size === 0) {
       return await readChaptersFromDb(dbPath);
     }
+
+    // 补洞：与 readChaptersFromDb 同口径，从第 1 章到最后一个有正文的章号连续展开，
+    //   缺口（无文件或文件为空）补占位章；尾部连续空章不补。
+    const contentNums = [...presentByNum.entries()]
+      .filter(([, c]) => !c.isPlaceholder)
+      .map(([n]) => n);
+    if (contentNums.length === 0) {
+      // 所有 markdown 文件都是空的：没有可发布的正文，回退数据库（库也没有则上层报错）
+      return await readChaptersFromDb(dbPath);
+    }
+    const ceiling = Math.max(...contentNums);
+    for (let no = 1; no <= ceiling; no++) {
+      const c = presentByNum.get(no);
+      if (c) {
+        chapters.push(c);
+      } else {
+        chapters.push({ file: `chapter_${no}.md`, content: '', chapterNum: no, title: `第${no}章`, isPlaceholder: true });
+      }
+    }
+
+    const phCount = chapters.filter((c) => c.isPlaceholder).length;
+    console.log(`✅ 找到 ${chapters.length} 个章节文件（含 ${phCount} 章未完成的占位）`);
 
     return chapters;
   } catch (error) {
@@ -1645,6 +1674,9 @@ export async function publishNovel(sessionDir, serverConfig, options = {}) {
     const displayTitle = bareTitle ? `第${i + 1}章：${bareTitle}` : `第${i + 1}章`;
     // 分部章节在标题下加一行浅色小标；.tts-skip 使其只展示、不进入朗读文本
     const kicker = part ? `<p class="part-kicker tts-skip">${escapeHtml(part.label)}</p>\n\n` : '';
+    // 占位章（中间章未生成）：保留章号与计划标题，正文换成「本章尚未完成」提示
+    const isPh = !!chapter.isPlaceholder;
+    const bodyMd = isPh ? PLACEHOLDER_BODY : stripLeadingHeading(chapter.content);
 
     sequence.push({
       kind: 'chapter',
@@ -1653,8 +1685,9 @@ export async function publishNovel(sessionDir, serverConfig, options = {}) {
       title: `${novelTitle} - ${displayTitle}`,
       chapterNum: i + 1,
       partNo: part ? part.no : 0,
+      isPlaceholder: isPh,
       chapterText: chapter.content,
-      markdown: `# ${displayTitle}\n\n${kicker}${stripLeadingHeading(chapter.content)}`
+      markdown: `# ${displayTitle}\n\n${kicker}${bodyMd}`
     });
   });
 
@@ -1677,6 +1710,7 @@ export async function publishNovel(sessionDir, serverConfig, options = {}) {
       title: page.label,
       chapterNum: page.chapterNum,
       partNo: page.partNo,
+      isPlaceholder: !!page.isPlaceholder,
       contentHash: hashContent(htmlContent)
     });
 
@@ -2054,26 +2088,46 @@ function injectReaderData(html, data) {
 }
 
 /**
- * 本地发布一本小说：从数据库读取章节，生成静态 HTML 写入 outRoot/<小说名>/
- * @param {string} dbPath - 小说库绝对路径
- * @param {string} outRoot - 输出根目录（ainovel/public/novel）
- * @param {Object} [options] - { title }
- * @returns {Promise<{novelDir:string, indexUrl:string, chapterCount:number, files:string[]}>}
+ * 抽取章节页正文容器（<div class="content">…</div>）的 HTML
+ * 页尾紧跟 chapter-nav，故以「下一个 chapter-nav」为截断依据；找不到才退化到首个 </div>。
+ * （正文里嵌入过 raw <div> 时，首个 </div> 会把正文剔坏）
  */
-export async function publishNovelLocal(dbPath, outRoot, options = {}) {
+export function extractContentHtml(html) {
+  const s = String(html || '');
+  const open = '<div class="content">';
+  const i = s.indexOf(open);
+  if (i < 0) return '';
+  const rest = s.slice(i + open.length);
+  const nav = rest.indexOf('<div class="chapter-nav">');
+  const end = nav >= 0 ? nav : rest.indexOf('</div>');
+  return end >= 0 ? rest.slice(0, end) : rest;
+}
+
+/** 章节页正文的纯文本口径（预览 diff / 变更判定都用它，不受内嵌 quiz/vocab JSON 干扰） */
+export function extractContentText(html) {
+  return htmlToText(extractContentHtml(html));
+}
+
+/**
+ * 渲染一本小说的全部静态页（不落盘）：发布与预览共用同一渲染口径，
+ * 保证「预览看到的就是将要发布的」。
+ * @param {string} dbPath - 小说库绝对路径
+ * @param {Object} [options] - { title, generateQuiz, quizAge, pickVocab, vocabAge }
+ * @returns {Promise<{novelTitle:string, novelDir:string, chapterCount:number, pages:Array, indexHtml:string}>}
+ *   pages[]: { filename, kind, label, title, chapterNum, partNo, html, contentText }
+ */
+export async function renderNovelPages(dbPath, options = {}) {
   if (!dbPath || !fs.existsSync(dbPath)) {
-    throw new Error(`publishNovelLocal: 小说库不存在 ${dbPath}`);
+    throw new Error(`renderNovelPages: 小说库不存在 ${dbPath}`);
   }
 
   const chapters = await readChaptersFromDb(dbPath);
   if (chapters.length === 0) {
-    throw new Error(`publishNovelLocal: 小说库无正文章节（${dbPath}）`);
+    throw new Error(`renderNovelPages: 小说库无正文章节（${dbPath}）`);
   }
 
   const novelTitle = options.title || (await readNovelTitleFromDb(dbPath)) || '小说';
   const novelDir = sanitizeDirName(novelTitle);
-  const targetDir = path.join(outRoot, novelDir);
-  fs.mkdirSync(targetDir, { recursive: true });
 
   // 分部结构与稳定文件名（与 publishNovel 生成段口径一致）
   const structure = await readNovelStructureFromDb(dbPath);
@@ -2113,6 +2167,9 @@ export async function publishNovelLocal(dbPath, outRoot, options = {}) {
     if (/^第\s*[0-9一二三四五六七八九十百零两]+\s*章$/.test(bareTitle)) bareTitle = '';
     const displayTitle = bareTitle ? `第${i + 1}章：${bareTitle}` : `第${i + 1}章`;
     const kicker = part ? `<p class="part-kicker tts-skip">${escapeHtml(part.label)}</p>\n\n` : '';
+    // 占位章（中间章未生成）：保留章号与计划标题，正文换成「本章尚未完成」提示，不参与预生成
+    const isPh = !!chapter.isPlaceholder;
+    const bodyMd = isPh ? PLACEHOLDER_BODY : stripLeadingHeading(chapter.content);
 
     sequence.push({
       kind: 'chapter',
@@ -2121,11 +2178,13 @@ export async function publishNovelLocal(dbPath, outRoot, options = {}) {
       title: `${novelTitle} - ${displayTitle}`,
       chapterNum: i + 1,
       partNo: part ? part.no : 0,
-      markdown: `# ${displayTitle}\n\n${kicker}${stripLeadingHeading(chapter.content)}`
+      isPlaceholder: isPh,
+      chapterText: chapter.content,
+      markdown: `# ${displayTitle}\n\n${kicker}${bodyMd}`
     });
   });
 
-  const written = [];
+  const pages = [];
   const chapterPages = [];
   let prefacePage = null;
 
@@ -2135,8 +2194,10 @@ export async function publishNovelLocal(dbPath, outRoot, options = {}) {
     const nextUrl = s < sequence.length - 1 ? sequence[s + 1].filename : null;
     const navHtml = buildChapterNav(prevUrl, nextUrl);
     let htmlContent = markdownToHtml(page.markdown, page.title, navHtml);
+    // 占位章不预生成拼音/测试/生词（无正文可推，也会白跑 LLM）
+    const pregen = page.kind === 'chapter' && !page.isPlaceholder;
     // 发布时预生成拼音数据，嵌入 reader-data，前端拼音模式零延迟启动
-    if (page.kind === 'chapter') {
+    if (pregen) {
       try {
         const pyData = generatePinyinData(page.chapterText || page.markdown);
         if (pyData.length > 0) {
@@ -2145,7 +2206,7 @@ export async function publishNovelLocal(dbPath, outRoot, options = {}) {
       } catch { /* 拼音生成失败不阻断发布 */ }
     }
     // 发布时预生成章节测试并内嵌：读者端打开测试零 LLM、即时呈现；失败则回退按需生成，绝不阻断发布
-    if (page.kind === 'chapter' && typeof options.generateQuiz === 'function') {
+    if (pregen && typeof options.generateQuiz === 'function') {
       try {
         const questions = await options.generateQuiz(page.chapterText || page.markdown, options.quizAge || 9);
         if (Array.isArray(questions) && questions.length) {
@@ -2155,7 +2216,7 @@ export async function publishNovelLocal(dbPath, outRoot, options = {}) {
     }
     // 同理预生成生词表：学习模式下读者一打开正文就已标好，不必等回源
     // 内嵌不依赖缓存键口径一致（词表跟着页面走，对不上前端自己会回源），所以用原文文本直接推词即可
-    if (page.kind === 'chapter' && typeof options.pickVocab === 'function') {
+    if (pregen && typeof options.pickVocab === 'function') {
       try {
         const words = await options.pickVocab(page.chapterText || page.markdown, options.vocabAge || 9);
         if (Array.isArray(words) && words.length) {
@@ -2163,9 +2224,19 @@ export async function publishNovelLocal(dbPath, outRoot, options = {}) {
         }
       } catch { /* 预生成失败：跳过内嵌，读者端按需生成 */ }
     }
-    const localPath = path.join(targetDir, page.filename);
-    fs.writeFileSync(localPath, htmlContent, 'utf-8');
-    written.push(page.filename);
+    pages.push({
+      filename: page.filename,
+      kind: page.kind,
+      label: page.label,
+      title: page.title,
+      chapterNum: page.chapterNum ?? null,
+      partNo: page.partNo ?? 0,
+      html: htmlContent,
+      contentText: extractContentText(htmlContent),
+      // 导航快照：预览报告靠它判定「相邻章因本段插入/删除而改了上一章/下一章」
+      prevFilename: prevUrl,
+      nextFilename: nextUrl,
+    });
 
     const fileInfo = {
       url: page.filename,
@@ -2173,23 +2244,90 @@ export async function publishNovelLocal(dbPath, outRoot, options = {}) {
       filename: page.filename,
       kind: page.kind,
       chapterNum: page.chapterNum,
-      partNo: page.partNo
+      partNo: page.partNo,
+      isPlaceholder: !!page.isPlaceholder
     };
     if (page.kind === 'chapter') chapterPages.push(fileInfo);
     if (page.kind === 'preface') prefacePage = fileInfo;
   }
 
   // 小说目录页（章节索引）
-  const indexContent = generateIndex(chapterPages, novelTitle, {
+  const indexHtml = generateIndex(chapterPages, novelTitle, {
     prefaceUrl: prefacePage ? prefacePage.filename : null,
     parts: partViews
   });
-  fs.writeFileSync(path.join(targetDir, 'index.html'), indexContent, 'utf-8');
+
+  return {
+    novelTitle,
+    novelDir,
+    chapterCount: chapterPages.length,
+    pages,
+    indexHtml,
+    indexContentText: extractContentText(indexHtml),
+    parts: partViews,
+  };
+}
+
+/**
+ * 本地发布孤儿页面清理：删除小说目录下形如 chapter_*.html / page_*.html、但不在本次发布清单里的文件。
+ *
+ * 为什么必须删：发布是逐文件覆盖写，只写不删的话「删掉一章」「改了分部结构」在本地永远删不掉——
+ * 旧页面仍挂在原 URL 上，别的页面也可能仍链着它，读者读到的是库里已不存在的幽灵章节。
+ * 判定范围刻意收得很窄：只碰本目录直接下层、只碰这两类前缀，index.html 及其它任何文件一律不动；
+ * 这些文件都是库内容的渲染产物，随时能从库重生成，删了不会丢任何不可恢复的东西。
+ * @param {string} targetDir - 本篇小说的本地输出目录
+ * @param {string[]} keepFilenames - 本次发布实际产出的文件名
+ * @param {string} [outRoot] - 发布根目录，用于校验 targetDir 确实下了一级（护栏）
+ * @returns {string[]} 实际删除的文件名
+ */
+export function pruneLocalOrphanPages(targetDir, keepFilenames, outRoot) {
+  // 两道护栏，宁可少删不可误删：
+  // 1) 清单为空 = 本次一页也没产出，此时删所有旧页等于把书清空，直接跳过；
+  // 2) 书名被清洗后为空时 path.join(outRoot, '') 会退化成 outRoot 本身，
+  //    那就会拿用户根目录去清理，波及同一作者其它书的章节文件。
+  if (!Array.isArray(keepFilenames) || keepFilenames.length === 0) return [];
+  if (outRoot && path.resolve(String(targetDir)) === path.resolve(String(outRoot))) return [];
+  const keep = new Set(keepFilenames);
+  let entries;
+  try { entries = fs.readdirSync(targetDir, { withFileTypes: true }); } catch { return []; }
+  const orphans = entries
+    .filter((e) => e.isFile() && /^(chapter|page)_.*\.html$/.test(e.name) && !keep.has(e.name))
+    .map((e) => e.name);
+  for (const fn of orphans) {
+    try { fs.unlinkSync(path.join(targetDir, fn)); } catch (err) { console.warn(`⚠️  清理遗留页面失败 ${fn}: ${err.message}`); }
+  }
+  if (orphans.length) console.log(`🧹 已清理 ${orphans.length} 个遗留页面（已删章节/旧命名/旧分部导言）`);
+  return orphans;
+}
+
+/**
+ * 本地发布一本小说：渲染（含 quiz/生词预生成）后写入 outRoot/<小说名>/
+ * @param {string} dbPath - 小说库绝对路径
+ * @param {string} outRoot - 输出根目录（ainovel/public/novel）
+ * @param {Object} [options] - { title, urlBase, generateQuiz, pickVocab, quizAge, vocabAge, prune }
+ * @returns {Promise<{novelDir:string, indexUrl:string, chapterCount:number, files:string[], pruned:string[]}>}
+ */
+export async function publishNovelLocal(dbPath, outRoot, options = {}) {
+  const rendered = await renderNovelPages(dbPath, options);
+  const targetDir = path.join(outRoot, rendered.novelDir);
+  fs.mkdirSync(targetDir, { recursive: true });
+  for (const p of rendered.pages) fs.writeFileSync(path.join(targetDir, p.filename), p.html, 'utf-8');
+  fs.writeFileSync(path.join(targetDir, 'index.html'), rendered.indexHtml, 'utf-8');
+
+  // prune:false 时保留旧文件（比对/试跑用），默认与预览报告口径一致：报告说删的就真删
+  const files = [...rendered.pages.map((p) => p.filename), 'index.html'];
+  const pruned = options.prune === false ? [] : pruneLocalOrphanPages(targetDir, files, outRoot);
 
   const urlBase = String(options.urlBase ?? BASE_PATH).replace(/\/+$/, '');
-  const indexUrl = `${urlBase}/${novelDir}/index.html`;
-  console.log(`✅ 本地发布完成: ${targetDir}（${chapterPages.length} 章）→ ${indexUrl}`);
-  return { novelDir, indexUrl, chapterCount: chapterPages.length, files: [...written, 'index.html'] };
+  const indexUrl = `${urlBase}/${rendered.novelDir}/index.html`;
+  console.log(`✅ 本地发布完成: ${targetDir}（${rendered.chapterCount} 章）→ ${indexUrl}`);
+  return {
+    novelDir: rendered.novelDir,
+    indexUrl,
+    chapterCount: rendered.chapterCount,
+    files,
+    pruned,
+  };
 }
 
 /**

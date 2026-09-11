@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>发布前预览 · 修改报告</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif; background:#0f1419; color:#e7e9ea; min-height:100vh; padding-bottom:90px; }
+  .header { background:#1a252f; padding:14px 16px; position:sticky; top:0; z-index:100; border-bottom:1px solid #2c3e50; }
+  .topbar { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .header h1 { font-size:17px; font-weight:600; }
+  .back { font-size:13px; color:#3498db; text-decoration:none; white-space:nowrap; }
+  .sub { font-size:12px; color:#7f8c8d; margin-top:6px; word-break:break-all; }
+  .bar { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+  .bar button, .bar a { flex:1 1 auto; min-width:110px; padding:11px 12px; border-radius:10px; border:1px solid #2c3e50; background:#1a252f; color:#ecf0f1; font-size:14px; cursor:pointer; text-decoration:none; text-align:center; }
+  .bar .primary { background:#2472a4; border-color:#2472a4; color:#fff; }
+  .bar .ok { background:#1e4620; border-color:#27ae60; color:#eafeea; }
+  .bar .danger { background:#7c2d2d; border-color:#7c2d2d; }
+  .bar .disabled { opacity:.45; pointer-events:none; }
+  .section { padding:14px 16px; }
+  .grp-title { font-size:12px; color:#7f8c8d; letter-spacing:1px; margin:6px 0 10px; }
+  .result { background:#1a252f; border-radius:12px; padding:14px; border-left:3px solid #3498db; font-size:14px; line-height:1.7; white-space:pre-wrap; word-break:break-word; }
+  .result.err { border-left-color:#c0392b; color:#e74c3c; }
+  .result.ok { border-left-color:#27ae60; }
+  .chips { display:flex; flex-wrap:wrap; gap:8px; }
+  .chip { font-size:12px; padding:6px 10px; border-radius:20px; background:#151d24; border:1px solid #2c3e50; color:#bdc3c7; }
+  .chip b { color:#ecf0f1; font-size:13px; }
+  .chip.add { border-color:#1e4620; } .chip.add b { color:#2ecc71; }
+  .chip.mod { border-color:#4a3a12; } .chip.mod b { color:#f1c40f; }
+  .chip.del { border-color:#4a1e1e; } .chip.del b { color:#e74c3c; }
+  .chip.cas { border-color:#1b3a4a; } .chip.cas b { color:#3498db; }
+  .notes { background:#151d24; border:1px solid #2c3e50; border-radius:12px; padding:12px 14px; font-size:13px; line-height:1.8; }
+  .notes li { margin-left:18px; }
+  .filter { display:flex; align-items:center; gap:6px; font-size:13px; color:#95a5a6; margin-bottom:10px; }
+  .row { background:#1a252f; border:1px solid #2c3e50; border-radius:10px; margin-bottom:8px; overflow:hidden; }
+  .row.hide { display:none; }
+  .rowhead { display:flex; align-items:center; gap:8px; padding:11px 12px; cursor:pointer; }
+  .rowhead .t { flex:1; min-width:0; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .rowhead .f { font-size:11px; color:#5d6d7e; font-family:ui-monospace,Menlo,monospace; }
+  .badge { font-size:11px; padding:2px 8px; border-radius:10px; white-space:nowrap; }
+  .badge.add { background:#1e4620; color:#2ecc71; }
+  .badge.mod { background:#4a3a12; color:#f1c40f; }
+  .badge.del { background:#4a1e1e; color:#e74c3c; }
+  .badge.cas { background:#12303f; color:#5dade2; }
+  .badge.same { background:#22303a; color:#7f8c8d; }
+  .rowbody { padding:0 12px 12px; border-top:1px solid #22303a; }
+  ul.reasons { margin:10px 0 0 18px; font-size:13px; line-height:1.8; color:#bdc3c7; }
+  ul.reasons li.code-nav, ul.reasons li.code-renumber { color:#5dade2; }
+  ul.reasons li.code-rename { color:#bb8fce; }
+  ul.reasons li.code-removed { color:#e74c3c; }
+  .diffbtn { margin-top:10px; padding:9px 14px; border-radius:8px; border:1px solid #2c3e50; background:#0f1419; color:#ecf0f1; font-size:13px; cursor:pointer; }
+  .diff { margin-top:10px; background:#0f1419; border:1px solid #2c3e50; border-radius:8px; padding:12px; font-size:14px; line-height:1.9; max-height:420px; overflow:auto; }
+  .diff .op { display:block; }
+  .diff .add { background:rgba(46,204,113,.14); color:#d5f5e3; border-left:3px solid #27ae60; padding-left:8px; }
+  .diff .del { background:rgba(231,76,60,.12); color:#f5b7b1; border-left:3px solid #c0392b; padding-left:8px; text-decoration:line-through; text-decoration-color:rgba(231,76,60,.45); }
+  .diff .same { color:#7f8c8d; }
+  .diff .meta { font-size:12px; color:#7f8c8d; margin-bottom:8px; }
+  .loading { text-align:center; color:#7f8c8d; padding:24px; }
+  .stat { font-size:12px; color:#95a5a6; margin-top:6px; }
+  .foot { position:fixed; left:0; right:0; bottom:0; background:#1a252f; border-top:1px solid #2c3e50; padding:10px 16px; display:flex; gap:10px; z-index:100; }
+  .foot button { flex:1; padding:13px; border:none; border-radius:10px; font-size:15px; cursor:pointer; }
+  .f-pub { background:#27ae60; color:#fff; }
+  .f-drop { background:#2c3e50; color:#ecf0f1; }
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="topbar">
+    <h1>👁 发布前预览 · 修改报告</h1>
+    <a class="back" id="backLink" href="#">← 返回管理</a>
+  </div>
+  <div class="sub" id="head">正在读取报告…</div>
+  <div class="bar">
+    <a id="openSite" class="primary disabled" href="#" target="_blank">📖 打开预览站</a>
+    <button id="regen">↻ 重新生成预览</button>
+    <button id="reload">🔄 只看变化（不重渲染）</button>
+  </div>
+</div>
+
+<div class="section">
+  <div class="grp-title">总览</div>
+  <div class="chips" id="chips"><span class="chip">加载中…</span></div>
+  <div class="notes" id="notes" style="margin-top:10px"></div>
+</div>
+
+<div class="section">
+  <div class="grp-title">逐页说明（点一行展开原因与 diff）</div>
+  <label class="filter"><input type="checkbox" id="showSame"> 显示未改动的页面</label>
+  <div id="rows"><div class="loading">加载中…</div></div>
+</div>
+
+<div class="foot">
+  <button class="f-drop" id="drop">作废预览</button>
+  <button class="f-pub" id="publish">✅ 确认发布</button>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const enc = encodeURIComponent;
+/* 站点前缀：本页固定在 <BASE>/admin/ 下，据此反推；接口与跳转都按前缀发出 */
+const BASE = location.pathname.replace(/\/admin(\/.*)?$/, '');
+const Q = new URLSearchParams(location.search);
+const NOVEL = Q.get('novel') || '';
+let TOKEN = Q.get('token') || '';
+
+const api = (p, opt) => fetch(BASE + '/api' + p, opt).then(async r => {
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 401) { location.replace(BASE + '/login/'); throw new Error('登录已过期'); }
+  if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+  return j;
+});
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+function showResult(msg, cls) {
+  $('#head').innerHTML = `<div class="result ${cls || ''}">${escapeHtml(msg)}</div>`;
+}
+function fmtTs(ts) { return ts ? new Date(Number(ts)).toLocaleString('zh-CN', { hour12: false }) : ''; }
+
+$('#backLink').href = BASE + '/admin/';
+
+// ── 报告渲染 ──
+const STATE_TXT = { added: '新增', modified: '正文改动', removed: '待下线', present: '有变化', unchanged: '未变' };
+
+function stateOf(it) {
+  if (it.state === 'added') return { cls: 'add', txt: STATE_TXT.added };
+  if (it.state === 'removed') return { cls: 'del', txt: STATE_TXT.removed };
+  const hasContent = (it.reasons || []).some(r => r.code === 'content');
+  if (hasContent) return { cls: 'mod', txt: STATE_TXT.modified };
+  if ((it.reasons || []).length) return { cls: 'cas', txt: '连带影响' };
+  return { cls: 'same', txt: '未变' };
+}
+
+function renderChips(r) {
+  const s = r.summary || {};
+  const delta = (s.charsDelta || 0);
+  const chips = [
+    ['页数', s.pages, ''],
+    ['章节', s.chapters, ''],
+    ['新增', s.added, 'add'],
+    ['正文改动', s.modified, 'mod'],
+    ['连带影响', s.cascadeOnly, 'cas'],
+    [r.dirConflict ? '旧页暂不清理（书名冲突）' : '待下线（发布时删除）', s.removed, 'del'],
+    ['句 +', s.sentencesAdded, 'add'],
+    ['句 −', s.sentencesRemoved, 'del'],
+    ['字数', `${delta >= 0 ? '+' : ''}${delta}`, delta < 0 ? 'del' : 'add'],
+    ['章号顺延', s.reNumbered, 'cas'],
+    ['章名变更', s.renamed, 'cas'],
+    ['目录页', s.indexChanged ? '有变化' : '未变', s.indexChanged ? 'mod' : ''],
+  ];
+  $('#chips').innerHTML = chips
+    .filter(([, v]) => v !== undefined && v !== null && v !== 0 || typeof v === 'string')
+    .map(([k, v, cls]) => `<span class="chip ${cls}">${k} <b>${escapeHtml(v)}</b></span>`).join('');
+}
+
+function renderNotes(r) {
+  const list = (r.notes || []).map(n => `<li>${escapeHtml(n)}</li>`).join('');
+  const id = r.indexDiff || {};
+  const extra = [];
+  if ((id.added || []).length) extra.push(`目录新增条目：${id.added.map(x => escapeHtml(x.title || x.href)).join('、')}`);
+  if ((id.removed || []).length) extra.push(`目录移除条目：${id.removed.map(x => escapeHtml(x.title || x.href)).join('、')}`);
+  if ((id.changed || []).length) extra.push(`目录条目文字变化 ${id.changed.length} 条（章号或章名顺延所致）`);
+  const base = r.baseline || {};
+  const btxt = base.mode === 'preview'
+    ? '对比基准：另一份暂存预览'
+    : (base.published ? '对比基准：线上已发布版本' : '对比基准：线上尚无此书（首次发布）');
+  $('#notes').innerHTML = `<ul>${list || '<li>本次渲染与基准一致，没有可报告的改动。</li>'}${extra.map(x => `<li>${x}</li>`).join('')}</ul>
+    <div class="stat">${escapeHtml(btxt)} · 生成时间 ${escapeHtml(fmtTs(r.generatedAt))}</div>`;
+}
+
+function renderRows(r, token) {
+  const rows = (r.items || []).map(it => {
+    const st = stateOf(it);
+    const same = st.cls === 'same';
+    const reasons = (it.reasons || []).map(x => `<li class="code-${x.code}">${escapeHtml(x.text)}</li>`).join('');
+    const statLine = it.stats
+      ? `句：${it.stats.sentencesOld} → ${it.stats.sentencesNew}（+${it.stats.added} / −${it.stats.removed}）；字数 ${it.stats.charsOld} → ${it.stats.charsNew}`
+      : '';
+    const label = it.label && it.label !== it.filename ? it.label : (it.filename === 'index.html' ? '目录页' : it.filename);
+    const arrow = (it.oldLabel && it.newLabel && it.oldLabel !== it.newLabel)
+      ? `<div class="stat">${escapeHtml(it.oldLabel)} → ${escapeHtml(it.newLabel)}</div>` : '';
+    return `<div class="row${same ? ' hide same-row' : ''}" data-file="${escapeHtml(it.filename)}" data-token="${escapeHtml(token || '')}">
+      <div class="rowhead">
+        <span class="badge ${st.cls}">${escapeHtml(st.txt)}</span>
+        <div class="t">${escapeHtml(label)}</div>
+        <span class="f">${escapeHtml(it.filename)}</span>
+      </div>
+      <div class="rowbody">
+        ${arrow}
+        ${reasons ? `<ul class="reasons">${reasons}</ul>` : '<div class="stat">与基准完全一致。</div>'}
+        ${statLine ? `<div class="stat">${escapeHtml(statLine)}</div>` : ''}
+        ${it.diffAvailable ? '<button class="diffbtn">🔍 查看正文 diff</button><div class="diff" style="display:none"></div>' : ''}
+      </div>
+    </div>`;
+  }).join('');
+  $('#rows').innerHTML = rows || '<div class="loading">本报告没有任何页面条目</div>';
+
+  $('#rows').querySelectorAll('.row').forEach(row => {
+    const body = row.querySelector('.rowbody');
+    row.querySelector('.rowhead').onclick = () => { body.style.display = body.style.display === 'none' ? '' : 'none'; };
+    const btn = row.querySelector('.diffbtn');
+    if (btn) btn.onclick = async (e) => {
+      e.stopPropagation();
+      const box = row.querySelector('.diff');
+      if (box.dataset.loaded === '1') { box.style.display = box.style.display === 'none' ? '' : 'none'; return; }
+      btn.textContent = '比对中…';
+      try {
+        const file = row.dataset.file;
+        const d = await api(`/novels/${enc(NOVEL)}/preview/${enc(row.dataset.token || TOKEN)}/diff?file=${enc(file)}`);
+        box.innerHTML = renderDiff(d);
+        box.dataset.loaded = '1';
+        btn.textContent = '🔍 收起 / 展开 diff';
+      } catch (err) { btn.textContent = '❌ ' + err.message; return; }
+      box.style.display = '';
+    };
+  });
+}
+
+function renderDiff(d) {
+  const head = `<div class="meta">旧 ${d.stats.charsOld} 字 / ${d.stats.sentencesOld} 句 → 新 ${d.stats.charsNew} 字 / ${d.stats.sentencesNew} 句`
+    + `（新增 ${d.stats.added} 句、删除 ${d.stats.removed} 句${d.stats.coarse ? '；改动过大，已按整段对照显示' : ''}）</div>`;
+  const ops = (d.ops || []).map(op => {
+    if (op.type === 'same') return `<span class="op same">${escapeHtml(op.text)}</span>`;
+    if (op.type === 'add') return `<span class="op add">＋ ${escapeHtml(op.text)}</span>`;
+    return `<span class="op del">－ ${escapeHtml(op.text)}</span>`;
+  }).join('');
+  const nav = [];
+  if (d.old && d.current) {
+    if (d.old.label !== d.current.label) nav.push(`标题：${d.old.label} → ${d.current.label}`);
+    if (d.old.prev !== d.current.prev) nav.push(`上一章：${d.old.prev || '无'} → ${d.current.prev || '无'}`);
+    if (d.old.next !== d.current.next) nav.push(`下一章：${d.old.next || '无'} → ${d.current.next || '无'}`);
+  }
+  const navHtml = nav.length ? `<div class="meta">🧭 ${nav.map(escapeHtml).join('；')}</div>` : '';
+  return head + navHtml + (ops || '<span class="same">（无可比正文）</span>');
+}
+
+async function loadReport(token, notice) {
+  try {
+    // ref=live：报告与单页 diff 同一基准（线上正式版本），不然表上说「无改动」而 diff 里却有红绿
+    const r = await api(`/novels/${enc(NOVEL)}/preview/report?ref=live${token ? '&token=' + enc(token) : ''}`);
+    TOKEN = token || TOKEN;
+    const rep = r.report;
+    $('#head').innerHTML = notice
+      ? `<div class="result ok">${escapeHtml(notice)}</div>`
+      : `<b>《${escapeHtml(rep.novel.title)}》</b>　暂存目录 <code>${escapeHtml(rep.novel.dir)}</code>　token <code>${escapeHtml(TOKEN || '(直接比对)')}</code>`;
+    const siteUrl = `${BASE}/${enc(TOKEN)}/${enc(rep.novel.dir)}/index.html`;
+    const a = $('#openSite');
+    a.href = siteUrl; a.classList.remove('disabled');
+    renderChips(rep); renderNotes(rep); renderRows(rep, TOKEN);
+  } catch (e) { showResult('❌ 读取报告失败：' + e.message, 'err'); $('#rows').innerHTML = ''; }
+}
+
+// ── 操作 ──
+$('#regen').onclick = async () => {
+  if (!confirm('重新渲染整本并覆盖当前暂存站（会重算修改报告）。继续？')) return;
+  showResult('重新生成预览中…');
+  try {
+    const r = await api(`/novels/${enc(NOVEL)}/preview`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    TOKEN = r.token;
+    history.replaceState(null, '', `${location.pathname}?novel=${enc(NOVEL)}&token=${enc(TOKEN)}`);
+    loadReport(TOKEN, `✅ 预览已重新生成（${r.chapterCount} 页）`);
+  } catch (e) { showResult('❌ ' + e.message, 'err'); }
+};
+$('#reload').onclick = () => loadReport(TOKEN, null);
+$('#showSame').onchange = (e) => {
+  document.querySelectorAll('.row.same-row').forEach(row => { row.classList.toggle('hide', !e.target.checked); });
+};
+
+$('#publish').onclick = async () => {
+  if (!TOKEN) return showResult('缺少预览标识，请先生成预览', 'err');
+  if (!confirm('确认把这份预览内容发布到正式目录？')) return;
+  showResult('发布中…');
+  try {
+    const r = await api(`/novels/${enc(NOVEL)}/publish`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ previewToken: TOKEN }),
+    });
+    const drift = (r.drifted || []).length
+      ? `\n⚠️ ${r.drifted.length} 页在预览之后又被改过，已按最新发布内容一并重渲染：${r.drifted.slice(0, 5).join('、')}${r.drifted.length > 5 ? ' …' : ''}`
+      : '\n✅ 发布内容与预览完全一致。';
+    // 报告里标为「待下线」的页确实被删了才算发布到位，把数字显示出来以便核对
+    const pruned = (r.pruned || []).length
+      ? `\n🧹 已从线上删除 ${r.pruned.length} 个不再产出的旧页面：${r.pruned.slice(0, 5).join('、')}${r.pruned.length > 5 ? ' …' : ''}`
+      : (r.pruneSkipped ? `\n⚠️ ${r.pruneSkipped}` : '');
+    showResult(`✅ 已发布 ${r.chapterCount} 章\n📖 阅读地址：${r.indexUrl}${drift}${pruned}`, 'ok');
+  } catch (e) { showResult('❌ 发布失败：' + e.message, 'err'); }
+};
+
+$('#drop').onclick = async () => {
+  if (!TOKEN) return showResult('缺少预览标识', 'err');
+  if (!confirm('作废本次预览（删除暂存文件）？正式目录不受影响。')) return;
+  try {
+    await api(`/novels/${enc(NOVEL)}/preview/${enc(TOKEN)}`, { method: 'DELETE' });
+    $('#openSite').classList.add('disabled');
+    showResult('🗑️ 预览已作废，正式目录未改动。可回管理页重新生成。', 'ok');
+  } catch (e) { showResult('❌ ' + e.message, 'err'); }
+};
+
+if (!NOVEL) {
+  showResult('缺少小说标识：请从管理页点「👁 预览」进入本页', 'err');
+} else {
+  loadReport(TOKEN, null);
+}
+</script>
+</body>
+</html>

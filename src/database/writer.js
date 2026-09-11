@@ -8,6 +8,7 @@ import fs from 'fs-extra';
 import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
+import { normalizeGenConfig } from '../utils/wordTarget.js';
 
 /**
  * Writer 数据库类
@@ -81,6 +82,12 @@ export class WriterDB {
       // 不新增 content 行，避免污染发布侧 no >= 1 AND type = 'chapter' 的章节集合
       if (!cols.includes('preface')) {
         this.db.exec('ALTER TABLE content ADD COLUMN preface TEXT');
+      }
+      // 迁移：全书生成设定（每章目标字数等），同样只写在 no=0 行上，理由与 preface 一致。
+      // 为什么不复用 content 文字段塞标记：那是「给模型读的东西」，人改设定时会顺手删掉那行，
+      // 而且界面没法只把这一个数字显示出来——字数约束失效时是静默的，没人发现。
+      if (!cols.includes('gen_cfg')) {
+        this.db.exec('ALTER TABLE content ADD COLUMN gen_cfg TEXT');
       }
       // 回填缺失的 id（新插入由 _genId 显式生成，此处兜底历史数据）
       this.db.exec(`UPDATE content SET id = lower(hex(randomblob(8))) WHERE id IS NULL`);
@@ -204,12 +211,16 @@ export class WriterDB {
       this.ensureInitialized();
       
       const stmt = this.db.prepare(`
-        SELECT no, type, name, outline, content, preface, version, id, created_at, updated_at 
+        SELECT no, type, name, outline, content, preface, gen_cfg, version, id, created_at, updated_at 
         FROM content 
         WHERE no = 0
       `);
-      
-      return stmt.get() || null;
+
+      const row = stmt.get() || null;
+      // gen_cfg 统一在这里解成对象：让所有读设定的人都拿到同一个形状，
+      // 而不是各自记着“这一列是 JSON 字符串”、各自 try JSON.parse。
+      if (row) row.gen_cfg = this._parseGenConfig(row.gen_cfg);
+      return row;
     } catch (error) {
       console.error('❌ Failed to get novel info:', error.message);
       throw error;
@@ -334,19 +345,25 @@ export class WriterDB {
   /**
    * 获取所有章节
    * @param {Object} options - 查询选项
-   * @param {number} options.limit - 限制返回数量
+   * @param {number} options.limit - 限制返回数量（默认 1000；区间/全书扫描请改用 getChaptersInRange）
    * @param {number} options.offset - 偏移量
-   * @returns {Array} 章节列表
+   * @param {boolean} [options.includeContent=true] - 是否带回正文。为 false 时不取 content，
+   *        只给 LENGTH(content) 作 contentLength（足够判「有没有正文」「多少字」），
+   *        避免列表类调用把整本正文搬进内存。
+   * @returns {Array} 章节列表（含 no=0 概要行）
    */
   getAllChapters(options = {}) {
     try {
       // 确保数据库已初始化
       this.ensureInitialized();
       
-      const { limit = 1000, offset = 0 } = options;
+      const { limit = 1000, offset = 0, includeContent = true } = options;
+      // LENGTH() 对 TEXT 按字符计（中文 1 字算 1），与既有 wordCount = content.length 同口径
+      const cols = `no, name, outline, part_no, id, created_at, updated_at,
+        LENGTH(content) AS contentLength${includeContent ? ', content' : ''}`;
       
       const stmt = this.db.prepare(`
-        SELECT no, name, outline, content, part_no, id, created_at, updated_at 
+        SELECT ${cols}
         FROM content 
         ORDER BY no ASC 
         LIMIT ? OFFSET ?
@@ -370,7 +387,8 @@ export class WriterDB {
       this.ensureInitialized();
       
       const stmt = this.db.prepare(`
-        SELECT no, name, outline, content, part_no, id, created_at, updated_at 
+        SELECT no, name, outline, content, part_no, id, created_at, updated_at,
+        LENGTH(content) AS contentLength 
         FROM content 
         WHERE no = ?
       `);
@@ -608,6 +626,137 @@ export class WriterDB {
   }
 
   /**
+   * 批量插入章节：单个事务内「一次平移 + 连续 INSERT」，绝不触碰已有章节的内容。
+   *
+   * 为什么不循环调 addChapterOutline：
+   *  1) 那里每插一章就把后续全部章节平移一次，加 N 章要改 N × 总章数行；这里一次平移就够。
+   *  2) 逐条调用不是原子的——中途失败就留下「已平移但未插完」的半套状态，书会跳号且没人知道停在哪。
+   *
+   * 为什么用裸 INSERT 而不是 upsertChapter：upsert 撞到已有章号会把该章 name/outline 重写、
+   * content 清成空串。加章场景下那是毁稿而不是特性，所以这里让主键冲突直接把整个事务顶回来。
+   *
+   * @param {Array<{name?:string, outline:string, content?:string}>} chapters - 按阅读顺序的新章节（outline 必填）
+   * @param {Object} [anchor] - 插入位置：{ mode:'tail' }（默认，末尾追加）或 { mode:'after', no:N }（插在第 N 章之后；N=0 插到最前面）
+   * @param {Object} [opts] - { allowEmptyOutline }
+   * @param {boolean} [opts.allowEmptyOutline] - 允许先插无大纲的占位章。仅供「插入后立即回填大纲」的链路
+   *   （generateOutlinesForRange）使用，它有自己的空大纲判定与重跑补齐，不是给调用方绕开校验的口子
+   * @returns {Object} { success, from, to, insertedCount, shiftedCount, chapters, warning }
+   */
+  addChaptersBulk(chapters, anchor = {}, opts = {}) {
+    this.ensureInitialized();
+
+    const MAX_BULK = 50;   // 一次最多加几章：防手滑也防模型幻觉传个 2000 章进来
+    const allowEmptyOutline = opts?.allowEmptyOutline === true;
+    const list = Array.isArray(chapters) ? chapters : [];
+    if (list.length === 0) throw new Error('批量加章：章节清单为空');
+    if (list.length > MAX_BULK) throw new Error(`批量加章：单次最多 ${MAX_BULK} 章（本次 ${list.length} 章）`);
+    list.forEach((c, i) => {
+      if (!c || typeof c !== 'object') throw new Error(`批量加章：第 ${i + 1} 项不是章节对象`);
+      // 缺大纲必须硬拦：批量生成正文只照有 outline 的章节跑，否则目录上有这一章、点进去却是空白。
+      // 显式 allowEmptyOutline 是唯一例外——占位章由紧随其后的区间补大纲填上，没填上也能重跑再补
+      if (!String(c.outline || '').trim() && !allowEmptyOutline) {
+        throw new Error(`批量加章：第 ${i + 1} 项缺少大纲（outline）。无大纲的章节不会被批量生成正文，请先补上大纲`);
+      }
+    });
+
+    const mode = anchor && anchor.mode === 'after' ? 'after' : 'tail';
+    const maxNo = this.db.prepare(`SELECT MAX(no) AS m FROM content WHERE type = 'chapter' AND no > 0`).get()?.m || 0;
+    let from;
+    if (mode === 'tail') {
+      from = maxNo + 1;
+    } else {
+      const at = this._normalizeNo(anchor.no);
+      // at = 0 是合法值（插到全书最前面）；平移范国内不含 no=0 的概要行，不会被波及
+      if (at < 0 || at > maxNo) throw new Error(`批量加章：插入位置第 ${at} 章不存在（当前共 ${maxNo} 章）`);
+      from = at + 1;
+    }
+
+    const count = list.length;
+    const inserted = [];
+    const transaction = this.db.transaction(() => {
+      let shiftedCount = 0;
+      if (mode === 'after' && maxNo >= from) {
+        shiftedCount = this.db.prepare(`SELECT COUNT(*) AS c FROM content WHERE no >= ? AND type = 'chapter'`).get(from).c;
+        // 与 addChapterOutline 同理的两步法：先整体推到临时区避开主键唯一冲突，再整体落回 +count
+        const TEMP_OFFSET = 1000000;
+        this.db.prepare(`UPDATE content SET no = no + ?, updated_at = CURRENT_TIMESTAMP WHERE no >= ? AND type = 'chapter'`)
+          .run(TEMP_OFFSET, from);
+        this.db.prepare(`UPDATE content SET no = no - ? + ?, updated_at = CURRENT_TIMESTAMP WHERE no >= ? AND type = 'chapter'`)
+          .run(TEMP_OFFSET, count, TEMP_OFFSET + from);
+      }
+
+      for (let i = 0; i < count; i++) {
+        const no = from + i;
+        const name = String(list[i].name ?? '').trim();
+        const outline = String(list[i].outline ?? '').trim();
+        const content = typeof list[i].content === 'string' ? list[i].content : '';
+        // 归部必须在平移之后算：部区间由 content.part_no 聚合派生，先平移后算才能把新章归到正确的部
+        const partNo = this._resolvePartNo(no);
+        const id = this._genId();
+        this.db.prepare(`
+          INSERT INTO content (no, type, name, outline, content, part_no, version, id) 
+          VALUES (?, 'chapter', ?, ?, ?, ?, 1, ?)
+        `).run(no, name, outline, content, partNo, id);
+        inserted.push({ no, name, id, part_no: partNo });
+      }
+      return shiftedCount;
+    });
+
+    const shiftedCount = transaction();
+
+    // 章号不连续只提示不阻断：本次插入本身没覆盖任何旧章，跳号多半是历史脏数据（手工删过章），
+    // 拿它报错会把正常的末尾追加误伤；把收敛动作交给已有的「重排编号」入口
+    const span = this.db.prepare(`SELECT COUNT(*) AS c, MIN(no) AS lo, MAX(no) AS hi FROM content WHERE type = 'chapter' AND no > 0`).get();
+    const contiguous = span.c > 0 && span.lo === 1 && span.hi === span.c;
+    const warning = contiguous ? null
+      : `章号不连续（共 ${span.c} 章，最大章号 ${span.hi}）。本次插入未覆盖任何已有章节，但建议跑一次「重排编号」收敛。`;
+
+    return {
+      success: true,
+      action: 'bulkInserted',
+      from,
+      to: from + count - 1,
+      insertedCount: count,
+      shiftedCount,
+      chapters: inserted,
+      warning,
+    };
+  }
+
+  /**
+   * 最大章号（用于未给区间时按全书扫描）。不用 getChapterCount：它 COUNT 的是 content 全表，
+   * 会把 no=0 的小说概要行算进去，得到「章数 +1」。
+   * @returns {number} 无章节时返回 0
+   */
+  getMaxChapterNo() {
+    this.ensureInitialized();
+    return this.db.prepare(`SELECT MAX(no) AS m FROM content WHERE type = 'chapter' AND no > 0`).get()?.m || 0;
+  }
+
+  /**
+   * 区间内的章节（带大纲原文与正文长度），供「区间补大纲」定位目标与改写前留档。
+   *
+   * 为什么不用 getAllChapters：它默认 LIMIT 1000，1000 章之后的大纲会被静默漏掉，
+   * 于是「全书找空大纲」在一本长篇上会给出假的干净结论。
+   *
+   * @param {number} from - 起始章号（含）
+   * @param {number} to - 结束章号（含）
+   * @returns {Array<{no,name,outline,part_no,id,contentLength}>}
+   */
+  getChaptersInRange(from, to) {
+    this.ensureInitialized();
+    const lo = this._normalizeNo(from);
+    const hi = this._normalizeNo(to);
+    if (hi < lo) throw new Error(`区间无效：起始章号 ${lo} 大于结束章号 ${hi}`);
+    return this.db.prepare(`
+      SELECT no, name, outline, part_no, id, LENGTH(content) AS contentLength
+      FROM content
+      WHERE type = 'chapter' AND no BETWEEN ? AND ?
+      ORDER BY no ASC
+    `).all(lo, hi);
+  }
+
+  /**
    * 更新指定章节的大纲
    * @param {number} no - 章节号
    * @param {string} outline - 新的大纲内容
@@ -622,11 +771,17 @@ export class WriterDB {
       no = this._normalizeNo(no);
       
       // 检查章节是否存在
-      const existing = this.db.prepare('SELECT no FROM content WHERE no = ?').get(no);
+      const existing = this.db.prepare('SELECT no, outline FROM content WHERE no = ?').get(no);
       
       if (!existing) {
         return { success: false, error: `Chapter ${no} does not exist` };
       }
+
+      // outline 为 undefined/null 表示“本次不打算改大纲”，必须沿用原值：
+      // better-sqlite3 把 undefined 绑定成 NULL 且不报错，所以上层只改标题（菜单「更新章节大纲」、
+      // AI 的 updateNovelPlan）会静默把大纲清成 NULL，还返回 success:true。
+      // 显式传 '' 仍是清空，不受影响。
+      const nextOutline = outline === undefined || outline === null ? existing.outline : outline;
       
       // 更新大纲（和标题，如果提供）
       if (name) {
@@ -634,13 +789,13 @@ export class WriterDB {
           UPDATE content 
           SET outline = ?, name = ?, version = version + 1, updated_at = CURRENT_TIMESTAMP 
           WHERE no = ?
-        `).run(outline, name, no);
+        `).run(nextOutline, name, no);
       } else {
         this.db.prepare(`
           UPDATE content 
           SET outline = ?, version = version + 1, updated_at = CURRENT_TIMESTAMP 
           WHERE no = ?
-        `).run(outline, no);
+        `).run(nextOutline, no);
       }
       
       return { success: true, action: 'updated', no, dbAction: 'updated' };
@@ -789,6 +944,58 @@ export class WriterDB {
       console.error('❌ Failed to get preface:', error.message);
       throw error;
     }
+  }
+
+  /**
+   * 解 gen_cfg 列。坏数据当「未设置」看待但告警：
+   * 抛穿会把「看小说信息」这种读操作也变成 500，静默则会让字数约束悄悄失效。
+   * @param {string|null} raw
+   * @returns {Object|null}
+   */
+  _parseGenConfig(raw) {
+    if (!raw) return null;
+    try {
+      return normalizeGenConfig(JSON.parse(raw));
+    } catch {
+      console.warn('⚠️ gen_cfg 解析失败，本次按「未设置字数目标」处理');
+      return null;
+    }
+  }
+
+  /**
+   * 保存全书生成设定（只写在 no=0 概要行的 gen_cfg 列）
+   *
+   * 校验放在这个唯一的落库口：REST、命令行 /api/run、AI 工具三条路都经这里，
+   * 各自再校一遍只会把口径写坏（曾经 targetWordCount 只在一处校验）。
+   * 传 null/'' 是清除（回到「不设限」），传形状不对的值则抛错，不静默修正。
+   * @param {Object|null|undefined} cfg - { targetWords, tolerancePct, splitPct }
+   * @returns {Object} { success, cleared, cfg }
+   */
+  saveGenConfig(cfg) {
+    this.ensureInitialized();
+    const existing = this.db.prepare('SELECT no FROM content WHERE no = 0').get();
+    if (!existing) {
+      throw new Error('小说概要（no=0）不存在，无法保存生成设定；请先保存小说基本信息');
+    }
+    const clear = cfg === null || cfg === undefined || cfg === '';
+    const norm = clear ? null : normalizeGenConfig(cfg);
+    // 只要给过配置就存，包括 targetWords=0：那一行现在是“用户显式取消了限制”的凭据。
+    // 不存的话，“取消限制”与“从未设过”在库里一模一样，旧的文字标记会把取消顶回去。
+    const store = clear ? null : JSON.stringify(norm);
+    this.db.prepare(`
+      UPDATE content SET gen_cfg = ?, updated_at = CURRENT_TIMESTAMP WHERE no = 0
+    `).run(store);
+    return { success: true, cleared: store === null, cfg: store ? norm : normalizeGenConfig(null) };
+  }
+
+  /**
+   * 读全书生成设定
+   * @returns {Object|null} 归一化后的配置；未设置时为 null（由调用方决定是否回落旧标记）
+   */
+  getGenConfig() {
+    this.ensureInitialized();
+    const row = this.db.prepare('SELECT gen_cfg FROM content WHERE no = 0').get();
+    return this._parseGenConfig(row?.gen_cfg);
   }
 
   /**

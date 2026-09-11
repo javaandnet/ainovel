@@ -16,6 +16,9 @@
   .novel-row { display:flex; gap:8px; margin-top:10px; }
   .novel-select { flex:1; min-width:0; padding:11px 12px; border-radius:10px; background:#0f1419; color:#e7e9ea; border:1px solid #2c3e50; font-size:15px; }
   .newbtn { padding:0 14px; border-radius:10px; background:#2472a4; color:#fff; border:none; font-size:14px; cursor:pointer; white-space:nowrap; }
+  .llmchip { flex:0 0 auto; padding:0 10px; border-radius:10px; border:1px solid #2c3e50; background:#0f1419; color:#95a5a6; font-size:12px; cursor:pointer; white-space:nowrap; }
+  .llmchip.ok { border-color:#27ae60; color:#2ecc71; }
+  .llmchip.bad { border-color:#c0392b; color:#e74c3c; }
   .tabs { display:flex; gap:8px; margin-top:12px; }
   .tab { flex:1; padding:11px; border:none; background:transparent; color:#7f8c8d; font-size:14px; border-bottom:2px solid transparent; cursor:pointer; }
   .tab.active { color:#ecf0f1; border-bottom-color:#3498db; font-weight:600; }
@@ -37,6 +40,9 @@
   .ch-row .no { color:#7f8c8d; margin-right:6px; }
   .ch-row .tag { font-size:11px; color:#95a5a6; white-space:nowrap; }
   .tag .y { color:#27ae60; } .tag .n { color:#c0392b; }
+  /* 上面的 .y/.n 作用域限在 .tag 内；分部预览在 .kv 里，不另加规则就会跟着 .kv 的灰色走，警告看不出是警告 */
+  .pt-pv .y { color:#27ae60; } .pt-pv .n { color:#c0392b; font-weight:600; }
+  .ch-row .tag .wc { color:#3498db; margin-left:7px; }
   .pager { display:flex; align-items:center; justify-content:space-between; margin-top:12px; font-size:13px; color:#95a5a6; }
   .pager button { padding:8px 14px; border-radius:8px; background:#1a252f; border:1px solid #2c3e50; color:#ecf0f1; cursor:pointer; }
   .pager button:disabled { opacity:.4; }
@@ -51,6 +57,10 @@
   .cmd-send { width:44px; height:44px; border-radius:50%; background:#3498db; border:none; color:#fff; font-size:20px; cursor:pointer; }
   .mask { display:none; position:fixed; inset:0; background:rgba(0,0,0,.72); z-index:200; align-items:flex-end; justify-content:center; }
   .mask.show { display:flex; }
+  /* OK 确认层要盖在普通弹层之上、执行遮罩（.busy 300）之下：删除按钮就在章节
+   * 编辑弹层里，同层互盖会把表单顶掉；而确认后任务开跑时遮罩又要能盖住确认层。 */
+  .ok-mask { z-index:250; }
+  .ok-hint { font-size:12px; color:#e67e22; min-height:16px; margin-top:6px; }
   .sheet { background:#1a252f; width:100%; max-width:560px; border-radius:16px 16px 0 0; padding:20px; max-height:88vh; overflow:auto; }
   .sheet h2 { font-size:16px; margin-bottom:6px; }
   .sheet .desc { font-size:12px; color:#7f8c8d; margin-bottom:14px; }
@@ -59,16 +69,41 @@
   .field input, .field textarea, .field select { width:100%; padding:10px 12px; border-radius:8px; border:1px solid #2c3e50; background:#0f1419; color:#e7e9ea; font-size:14px; outline:none; }
   .field textarea { min-height:96px; resize:vertical; }
   .field textarea.tall { min-height:180px; }
+  /* 切章过渡：新内容按方向轻移入场。不做“先淡出再淡入”的两段——中间那段空白
+   * 看上去就像按钮没生效，而这里要的恰好是“翻过去了”的确定感。 */
+  @keyframes ch-in-r { from { opacity:0; transform:translateX(26px); } to { opacity:1; } }
+  @keyframes ch-in-l { from { opacity:0; transform:translateX(-26px); } to { opacity:1; } }
+  .sheet.ch-in-next { animation: ch-in-r .22s ease-out; }
+  .sheet.ch-in-prev { animation: ch-in-l .22s ease-out; }
+  .ch-nav { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
+  .ch-nav button { flex:1; min-width:0; padding:9px 8px; border-radius:9px; border:1px solid #2c3e50; background:#151d24; color:#ecf0f1; font-size:13px; cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ch-nav button:disabled { opacity:.35; cursor:not-allowed; }
+  .ch-nav .cur { flex:0 0 auto; font-size:12px; color:#7f8c8d; }
+  /* 状态行里的轻动作（换回上一版 / 采用建议标题）：不该占一个整按钮的位置 */
+  .lbtn { background:none; border:none; color:#3498db; font-size:12px; cursor:pointer; padding:0; text-decoration:underline; }
+  /* 大纲框下方那一行：不借用 .kv，它带 word-break:break-all，整句中文会被任意处断行 */
+  .ch-note { font-size:12px; color:#95a5a6; line-height:1.7; margin:-4px 0 10px; }
+  .ch-note:empty { display:none; }
   .row2 { display:flex; gap:10px; align-items:flex-end; }
   .row2 .field { flex:1; }
   .actions { display:flex; gap:10px; margin-top:8px; flex-wrap:wrap; }
   .actions button { flex:1; min-width:96px; padding:13px; border:none; border-radius:10px; font-size:15px; cursor:pointer; }
+  /* 没有这条，disabled 的按钮与能用的一模一样：看不出被禁，只会反复点。 */
+  .actions button:disabled { opacity:.42; cursor:not-allowed; }
   .b-cancel { background:#2c3e50; color:#ecf0f1; }
   .b-run { background:#3498db; color:#fff; }
   .b-ok { background:#27ae60; color:#fff; }
   .b-gray { background:#3a4750; color:#dfe4e8; }
   .b-danger { background:#a33; color:#fff; }
   .loading { text-align:center; color:#7f8c8d; padding:24px; }
+  .busy { display:none; position:fixed; inset:0; background:rgba(0,0,0,.62); z-index:300; align-items:center; justify-content:center; }
+  .busy-card { background:#1a252f; border:1px solid #2c3e50; border-radius:14px; padding:22px 24px; width:min(420px, 88vw); text-align:center; }
+  .spin { width:34px; height:34px; margin:0 auto 12px; border-radius:50%; border:3px solid #2c3e50; border-top-color:#3498db; animation:busy-spin .9s linear infinite; }
+  @keyframes busy-spin { to { transform:rotate(360deg); } }
+  .busy-title { font-size:15px; color:#ecf0f1; }
+  .busy-elapsed { font-size:12px; color:#7f8c8d; margin-top:4px; }
+  .busy-log { margin-top:10px; max-height:150px; overflow:auto; text-align:left; font-size:12px; color:#95a5a6; white-space:pre-wrap; line-height:1.6; }
+  .busy-note { margin-top:10px; font-size:11px; color:#5d6d7e; }
   .kv { font-size:12px; color:#95a5a6; word-break:break-all; margin-top:8px; }
   .utable { width:100%; border-collapse:collapse; font-size:13px; }
   .utable th, .utable td { text-align:left; padding:9px 6px; border-bottom:1px solid #2c3e50; }
@@ -79,6 +114,16 @@
 </style>
 </head>
 <body>
+<!-- 长任务遮罩：由公共入口 api() 驱动（详见脚本里的 busyPush/busyPop），不需要手关 -->
+<div class="busy" id="busyMask">
+  <div class="busy-card">
+    <div class="spin"></div>
+    <div class="busy-title" id="busyTitle">处理中…</div>
+    <div class="busy-elapsed" id="busyElapsed">已用 0 秒</div>
+    <div class="busy-log" id="busyLog"></div>
+    <div class="busy-note">进度来自服务端，完成后自动关闭。请不要关闭本页。</div>
+  </div>
+</div>
 <div class="header">
   <div class="topbar">
     <h1>📚 小说管理</h1>
@@ -87,6 +132,7 @@
   <div class="novel-row">
     <select class="novel-select" id="novelSel"><option value="">— 选择小说 —</option></select>
     <button class="newbtn" id="newNovelBtn">＋ 新建</button>
+    <button class="llmchip" id="llmChip" title="点击重新检测">⋯ AI 链路</button>
   </div>
   <div class="tabs">
     <button class="tab active" data-tab="flow">流程管理</button>
@@ -103,14 +149,31 @@
       <div class="field"><label>书名 *</label><input id="setName"></div>
       <div class="field"><label>故事简介</label><textarea id="setOutline"></textarea></div>
       <div class="field"><label>角色 / 世界观设定</label><textarea id="setContent"></textarea></div>
+      <!-- 每章字数目标：整本书的共同设定，生成大纲与正文都会读这三个数。
+           默认只占位不填值（空 = 未设限），免得一进页面就看到 0 被当成“已设过”。 -->
+      <div class="row2">
+        <div class="field"><label>每章目标字数（空/0 = 不限）</label><input id="setTargetWords" type="number" min="0" max="20000" step="100" placeholder="如 3000"></div>
+        <div class="field"><label>允许浮动 %</label><input id="setTolerance" type="number" min="5" max="50" step="5" placeholder="默认 20"></div>
+        <div class="field"><label>超目标多少拆章 %</label><input id="setSplitPct" type="number" min="20" max="300" step="10" placeholder="默认 60"></div>
+      </div>
+      <!-- 超长处理方式：与上面三个数一起存进 gen_cfg。两种模式都保证「每章字数落在合格带内」，
+           区别只在写超了的内容怎么办：砍掉，还是拆成更多章。默认 trim（章数不变）。 -->
+      <div class="field"><label>超出上限时怎么处理</label><select id="setOverflow">
+        <option value="trim">删减次要场景（章数不变）</option>
+        <option value="split">自由扩展（超出则拆成更多章，章数与总字数会增加）</option>
+      </select></div>
+      <div class="ch-note" id="wordCfgMeta"></div>
       <div class="field"><label>本书设定说明（读者向 · Markdown）</label><textarea id="setPreface" class="tall"></textarea></div>
       <div class="btns"><button class="mbtn primary wide" id="saveSettings">💾 保存设定</button></div>
       <div class="kv" id="setMeta"></div>
     </div>
-    <div class="section">
-      <div class="grp-title">🔒 VIP 设置</div>
-      <div class="field"><label>VIP 密码（留空则取消 VIP）</label><input id="vipPassword" type="text" placeholder="设置后读者需输入密码才能阅读"></div>
-      <div class="btns"><button class="mbtn" id="saveVip">💎 保存 VIP 设置</button></div>
+    <div class="section" style="padding-bottom:0">
+      <div class="grp-title">🔒 VIP 设置（读者账号授权制）</div>
+      <div class="field"><label class="chk" style="display:flex;align-items:center;gap:8px"><input id="vipOn" type="checkbox"> 本书为 VIP 专属（只有被授权的读者账号能读）</label></div>
+      <div class="btns">
+        <button class="mbtn" id="saveVip">💾 保存 VIP 开关</button>
+        <button class="mbtn" id="gotoVipAdmin">👥 管理授权读者</button>
+      </div>
       <div class="kv" id="vipMeta"></div>
     </div>
     <div class="section">
@@ -120,6 +183,40 @@
         <div class="field" style="flex:2"><button class="mbtn primary" id="genOutlines">🧭 生成 / 重建全部大纲</button></div>
       </div>
       <div class="kv" id="ogMeta"></div>
+      <div class="field" style="margin-top:6px"><label class="chk" style="display:flex;align-items:center;gap:8px"><input id="ogForce" type="checkbox"> ⚠️ 确认重建：命中章号的大纲/标题被重写、正文被清空（已建旧稿快照可回滚）</label></div>
+      <div class="kv" style="color:#c0392b">不勾选时，已有正文的书会被系统直接拦下（防「想把 10 章改到 15 章」反而清空前 10 章）。加章请用下面一栏。</div>
+    </div>
+    <div class="section">
+      <div class="grp-title">②b 加章 / 补大纲（单事务插入 · 不动已有正文）</div>
+      <div class="field"><label>方式</label><select id="bkMode">
+        <option value="manual">手写每章大纲（结构自己定，最可控）</option>
+        <option value="auto">只填章数＋素材，系统逐章补大纲（一次追加多章）</option>
+        <option value="fill">不新增章，只回填已有空大纲的章</option>
+      </select></div>
+      <div class="row2" id="bkAnchorWrap">
+        <div class="field"><label>插入位置</label><select id="bkAnchor"><option value="tail">末尾追加</option><option value="after">插在第 N 章之后</option></select></div>
+        <div class="field" id="bkAfterWrap" style="display:none"><label>第几章之后（0=全书最前）</label><input id="bkAfter" type="number" min="0"></div>
+      </div>
+      <div id="bkManualWrap">
+        <div id="bkRows"></div>
+        <div class="btns">
+          <button class="mbtn" id="bkAdd">＋ 加一章</button>
+          <button class="mbtn" id="bkSub">－ 减一章</button>
+        </div>
+      </div>
+      <div id="bkAutoWrap" style="display:none">
+        <div class="field"><label>新增章数（≤50）</label><input id="bkCount" type="number" min="1" max="50" value="3"></div>
+        <div class="field"><label>本段素材 / 构思</label><textarea id="bkMaterial" placeholder="这一段发生什么、要埋什么伏笔（可选）。不填则只根据小说概要衔接前后章自动写"></textarea></div>
+      </div>
+      <div id="bkFillWrap" style="display:none">
+        <div class="row2">
+          <div class="field"><label>从第几章（留空＝全书）</label><input id="bkFrom" type="number" min="1"></div>
+          <div class="field"><label>到第几章（留空＝全书）</label><input id="bkTo" type="number" min="1"></div>
+        </div>
+      </div>
+      <div class="btns"><button class="mbtn primary" id="bkGo">📚 加入目录</button></div>
+      <div class="kv" id="bkHint"></div>
+      <div class="kv">逐章补大纲是一章一次模型调用，章数越多越慢（每章约十几到几十秒）。“自动”与“回填”都只碰大纲为空的章，已有大纲会被跳过。</div>
     </div>
     <div class="section">
       <div class="grp-title">③ 章节列表（每页 50 章 · 点击某章可看/改大纲并生成正文）</div>
@@ -134,6 +231,7 @@
       <div class="btns" style="margin-top:8px">
         <button class="mbtn" id="renumber">🔢 重排编号</button>
         <button class="mbtn" id="flowCheck">🔍 一致性检查</button>
+        <button class="mbtn primary" id="flowPreview">👁 预览</button>
         <button class="mbtn" id="flowPublish">🚀 发布</button>
         <button class="mbtn" id="shareNovel">🔗 分享</button>
         <button class="mbtn danger" id="delNovel">🗑️ 删除本书</button>
@@ -162,13 +260,88 @@
 </div>
 
 <div class="mask" id="mask"><div class="sheet" id="sheet"></div></div>
+<!-- OK 二次确认专用层（askOk）：与 #mask 叠层使用，不抢它的表单 -->
+<div class="mask ok-mask" id="okMask"><div class="sheet" id="okSheet"></div></div>
 
 <script>
 const $ = (s) => document.querySelector(s);
 const enc = encodeURIComponent;
 /* 站点前缀：本页固定在 <BASE>/admin/ 下，据此反推；接口与跳转都按前缀发出 */
 const BASE = location.pathname.replace(/\/admin(\/.*)?$/, '');
-const api = (p, opt) => fetch(BASE + '/api' + p, opt).then(async r => {
+// ── 长任务反馈：遮罩 + 计时 + 服务端逐章进度，全部挂在公共入口 api() 上。
+// 为何不在各调用点分别加：这里有十几处 fetch，逐个加锁迟早漏一处，而漏一处就是一次重复提交。
+// 遮罩延后 600ms 才出现，所以快请求完全无感，只有真慢的任务才会看到。
+const PROGRESS_ACTIONS = new Set(['generate', 'gen', 'g', 'modify', 'mod', 'm',
+  'generateChapterOutlines', 'generateOutlinesForRange', 'generatePartIntros', 'generatePreface']);
+const ACTION_LABEL = {
+  generate: '✍️ 生成章节正文', gen: '✍️ 生成章节正文', g: '✍️ 生成章节正文',
+  modify: '✏️ 改写章节', mod: '✏️ 改写章节', m: '✏️ 改写章节',
+  generateChapterOutlines: '🧭 规划全书大纲', generateOutlinesForRange: '🧩 补写章节大纲',
+  generatePartIntros: '📖 生成各部导言', generatePreface: '📕 生成本书设定说明',
+  addChaptersBulk: '📚 批量加章', saveNovelPlan: '💾 保存小说规划', checkChapters: '🔍 一致性检查',
+};
+let busyCount = 0, busyShowTimer = null, busyTick = null, busyStart = 0, busyES = null;
+function busyPush(title) {
+  // 日志在「新任务开始」这一刻清，不能放到遮罩显示时清：进度比 600ms 还先到就会被抹掉，
+  // 而服务端缓冲重发的恰恰就是开头那几行（最想看的那部分）。
+  if (busyCount === 0) { $('#busyLog').textContent = ''; busyStart = Date.now(); }
+  busyCount++;
+  if (title) $('#busyTitle').textContent = title;
+  if (busyShowTimer) return;
+  busyShowTimer = setTimeout(() => {
+    $('#busyMask').style.display = 'flex';
+    busyTick = setInterval(() => {
+      $('#busyElapsed').textContent = `已用 ${Math.round((Date.now() - busyStart) / 1000)} 秒`;
+    }, 1000);
+  }, 600);
+}
+function busyPop() {
+  busyCount = Math.max(0, busyCount - 1);
+  if (busyCount > 0) return;   // 嵌套计数：③ 逐章循环期间不能中途关掉遮罩
+  clearTimeout(busyShowTimer); busyShowTimer = null;
+  clearInterval(busyTick); busyTick = null;
+  $('#busyMask').style.display = 'none';
+  progressClose();
+}
+function busyHold(title) { busyPush(title); return busyPop; }
+function busyLine(text) {
+  const box = $('#busyLog');
+  box.textContent += (box.textContent ? '\n' : '') + text;
+  box.scrollTop = box.scrollHeight;
+}
+function progressClose() { if (busyES) { try { busyES.close(); } catch {} busyES = null; } }
+function progressOpen(id) {
+  progressClose();
+  try {
+    busyES = new EventSource(BASE + '/api/progress?id=' + encodeURIComponent(id));
+    busyES.onmessage = (e) => {
+      let d = null; try { d = JSON.parse(e.data); } catch { return; }
+      if (d && d.type === 'line' && d.text) busyLine(d.text);
+    };
+    // 不断重连也不报错：进度只是锦上添花，结果仍在 /api/run 的响应里给
+    busyES.onerror = progressClose;
+  } catch { busyES = null; }
+}
+const newRunId = () => 'run:' + (typeof crypto !== 'undefined' && crypto.randomUUID
+  ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36));
+
+const api = async (p, opt) => {
+  let body = null;
+  try { if (typeof opt?.body === 'string') body = JSON.parse(opt.body); } catch { body = null; }
+  const isRun = p === '/run' && body && body.action;
+  // 发布/预览/体检/单章大纲草稿都要跑上几十秒，给它们同一套遮罩（服务端未埋进度点的就只有转圈+计时）
+  const SLOW_LABEL = { '/outline-draft': '🧭 生成本章大纲（一次模型调用，可能要一分多钟）', '/publish': '🚀 发布中…', '/preview': '🔍 生成预览…', '/check': '🔍 一致性检查…' };
+  const slowKey = ['/outline-draft', '/publish', '/preview', '/check'].find((k) => p.endsWith(k));
+  const busy = isRun ? (ACTION_LABEL[body.action] || '处理中…') : (slowKey ? SLOW_LABEL[slowKey] : null);
+  if (!busy) return apiRaw(p, opt);
+  const pid = isRun && PROGRESS_ACTIONS.has(body.action) ? newRunId() : null;
+  if (pid) opt = { ...opt, body: JSON.stringify({ ...body, progressId: pid }) };
+  busyPush(busy);
+  if (pid) progressOpen(pid);
+  try { return await apiRaw(p, opt); }
+  finally { busyPop(); }
+};
+const apiRaw = (p, opt) => fetch(BASE + '/api' + p, opt).then(async r => {
   const j = await r.json().catch(() => ({}));
   if (r.status === 401) { location.replace(BASE + '/login/'); throw new Error('登录已过期'); }
   if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
@@ -194,6 +367,25 @@ document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
   $('#panel-menu').style.display = tab === 'menu' ? '' : 'none';
 });
 
+// ── AI 链路状态灯：生成类操作全靠桥接服务，不通时后端的预检会直接拦下（不写坏数据），
+//    这里的灯只是让人在点按钮前就知道原因，而不是等几分钟看到一排 fetch failed ──
+async function checkLlm() {
+  const chip = $('#llmChip');
+  if (!chip) return;
+  chip.className = 'llmchip';
+  chip.textContent = '⋯ AI 链路';
+  try {
+    const r = await api('/llm-status');
+    chip.classList.add(r.ok ? 'ok' : 'bad');
+    chip.textContent = r.ok ? '🟢 AI 可用' : '🔴 AI 不通';
+    chip.title = r.ok ? r.detail : `${r.detail}\n（生成类操作会被系统直接拦下，不会写坏数据）`;
+  } catch (e) {
+    chip.classList.add('bad');
+    chip.textContent = '🔴 状态未知';
+    chip.title = e.message;
+  }
+}
+
 // ── 启动：先确认登录态 ──
 async function boot() {
   try {
@@ -206,6 +398,8 @@ async function boot() {
   } catch (e) { location.replace(BASE + '/login/'); return; }
   $('#logoutBtn').onclick = async () => { try { await fetch(BASE + '/api/logout', { method: 'POST' }); } catch {} location.replace(BASE + '/login/'); };
   $('#consoleBtn').onclick = () => { location.href = BASE + '/admin/dashboard.html'; };
+  checkLlm();   // 不阻塞首屏：灯慢一秒没关系，挡在生成前的预检才是硬保证
+  $('#llmChip').onclick = checkLlm;
 
   try {
     const [{ groups }, nv] = await Promise.all([api('/menu'), api('/novels')]);
@@ -255,30 +449,115 @@ $('#newNovelBtn').onclick = () => {
   };
 };
 
-// ── 删除整本 ──
+// ── 通用「输入 OK 二次确认」（删除类操作共用）──
+// 用独立一层 #okMask 而不是改写 #sheet：「🗑️ 删除本章」的按钮就在章节编辑弹层里，
+// 把 sheet 顶成确认框的话，用户刚输的大纲会跟着没了，点取消也回不来。
+//
+// 判定为何要归一化：之前按严格 === 'OK' 判，输错时按钮一直禁着，而 disabled 按钮
+// 点击不会触发任何事件、也不给任何提示，看上去就是“点了没反应”。小写 ok、
+// 中文输入法下的全角 ＯＫ、组合输入未触发 input 事件都会踩到。这里只宽在界面上：
+// 发给服务端的永远是常量 'OK'，接口契约的严格比对不变。
+const okTyped = (v) => String(v ?? '').normalize('NFKC').replace(/\s+/g, '').toUpperCase() === 'OK';
+let okDone = null;
+function askOk({ title, desc, btn = '确认删除' }) {
+  return new Promise((resolve) => {
+    $('#okSheet').innerHTML = `<h2>${title}</h2>
+      <div class="desc">${desc}请输入 <b>OK</b> 以确认。</div>
+      <div class="field"><label>输入 OK 确认</label><input id="okInput" placeholder="OK" autocomplete="off">
+        <div class="ok-hint" id="okHint"></div></div>
+      <div class="actions"><button class="b-cancel" id="okCancel">取消</button><button class="b-danger" id="okGo" disabled>${btn}</button></div>`;
+    $('#okMask').classList.add('show');
+    // 只留当前生效的那次收尾：取消/确认/点空白三个出口都要能幂等地关掉这层
+    okDone = (v) => { okDone = null; $('#okMask').classList.remove('show'); resolve(v); };
+    const inp = $('#okInput'), go = $('#okGo'), hint = $('#okHint');
+    const sync = () => {
+      const good = okTyped(inp.value);
+      go.disabled = !good;
+      // 不让按钮默默灰着：把“为什么不能点”写成可见的提示
+      hint.textContent = good || !inp.value.trim() ? '' : '需输入 OK（不区分大小写，全角也可以）';
+    };
+    inp.oninput = sync;
+    inp.oncompositionend = sync;   // 输入法提交候选词时补一次（部分浏览器此时候才拿到值）
+    sync();
+    inp.onkeydown = (e) => { if (e.key === 'Enter' && okTyped(inp.value)) okDone?.(true); };
+    $('#okCancel').onclick = () => okDone?.(false);
+    go.onclick = () => okDone?.(true);
+    setTimeout(() => inp.focus(), 50);
+  });
+}
+$('#okMask').addEventListener('click', (e) => { if (e.target === $('#okMask')) okDone?.(false); });
+
+// ── 删除整本（不可撤销，走同一个 askOk）──
 $('#delNovel').onclick = async () => {
   const id = requireNovel(); if (!id) return;
-  if (!confirm('确定删除整本小说？其数据文件将被移除，不可撤销。')) return;
-  try { await api(`/novels/${enc(id)}`, { method: 'DELETE' }); showResult('🗑️ 已删除该小说', 'ok'); currentNovel = ''; await reloadNovels(); onNovelChange(); }
-  catch (e) { showResult('❌ ' + e.message, 'err'); }
+  const name = escapeHtml($('#novelSel').selectedOptions[0]?.textContent || '该小说');
+  if (!await askOk({
+    title: '⚠️ 删除整本小说',
+    desc: `将永久删除「${name}」及其数据文件，此操作不可撤销。`,
+    btn: '删除',
+  })) return;
+  showLoading('删除中…');
+  try {
+    await api(`/novels/${enc(id)}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm: 'OK' }) });
+    showResult('🗑️ 已删除该小说', 'ok'); currentNovel = ''; await reloadNovels(); onNovelChange();
+  } catch (e) { showResult('❌ ' + e.message, 'err'); }
 };
 
 // ── ① 设定 ──
+// 三个字数输入框与超长处理方式的「载入时快照」。只有值真改过才把 genCfg 带进 PUT：
+// 只改书名时顺手把整个表单存回去，会把没填的字数框当成“清除目标”，约束就这么静默没的。
+// 快照必须带 overflow：漏了它，dirty 检测就盖不到新字段，只改书名会把模式抹回默认。
+// null = 还没读到库里的现值（初次加载失败/未选书），此时一律不写 genCfg。
+let wordCfgLoaded = null;
+const cfgNum = (sel, dflt) => { const v = $(sel).value.trim(); return v === '' ? dflt : Number(v); };
+// 只认两个合法值：后端 normalizeGenConfig 对非法值是抛错（不静默纠正），
+// 这里先收口，免得一个陈旧的 DOM 值直接把整个保存请求打成 400。
+const cfgOverflow = (v) => (v === 'split' ? 'split' : 'trim');
+function readWordCfg() {
+  return {
+    targetWords: cfgNum('#setTargetWords', 0),
+    tolerancePct: cfgNum('#setTolerance', 20),
+    splitPct: cfgNum('#setSplitPct', 60),
+    overflow: cfgOverflow($('#setOverflow').value),
+  };
+}
+
 async function loadSettings() {
   const id = requireNovelSilent(); if (!id) return;
+  wordCfgLoaded = null;
   try {
     const s = await api(`/novels/${enc(id)}/settings`);
     $('#setName').value = s.name || '';
     $('#setOutline').value = s.outline || '';
     $('#setContent').value = s.content || '';
     $('#setPreface').value = s.preface || '';
+    // 字数设定：未存过时三个框留空（靠 placeholder 说默认值），不把 20/60 当“用户设过的数”写回去
+    const g = s.genCfg || null;
+    wordCfgLoaded = { targetWords: Number(g?.targetWords) || 0, tolerancePct: Number(g?.tolerancePct) || 20, splitPct: Number(g?.splitPct) || 60, overflow: cfgOverflow(g?.overflow) };
+    $('#setTargetWords').value = g?.targetWords || '';
+    $('#setTolerance').value = g?.tolerancePct ?? '';
+    $('#setSplitPct').value = g?.splitPct ?? '';
+    $('#setOverflow').value = wordCfgLoaded.overflow;
+    const b = s.wordBand || {};
+    // 模式的代价必须写在设定旁边：自由扩展会改书结构（平移章号、总字数变多），
+    // 只在保存时提一句就晚了——人得在选之前就知道自己买的是什么
+    const ovTxt = wordCfgLoaded.overflow === 'split'
+      ? '自由扩展（超长时拆成更多章：章数与总字数会增加，且拆章会平移后续章号、已发布页面需重新发布）'
+      : '删减次要场景（超长时砍掉不推进情节的支线：章数不变）';
+    // 把换算后的区间直接说出来，不让人拿 3000 去心算 ±20%；区间与存值不符时补一句旧标记来源
+    $('#wordCfgMeta').innerHTML = b.on
+      ? `当前生效：每章目标 ${b.target} 字，合格 ${b.min}–${b.max} 字，超过 ${b.splitAt} 字建议拆章；超长处理方式＝${ovTxt}${g?.targetWords ? '' : '（沿用设定正文里的旧标记，建议在这里填一次并把那行字删掉）'}`
+      : `未设定：生成时不约束每章字数，已有章节也无法跑「字数治理」（它靠这个目标判定长短）。超长处理方式＝${ovTxt}，但要等设了目标字数才生效。`;
     $('#setMeta').textContent = `版本 ${s.version || 0}`;
     $('#ogTotal').value = s.chapterCount || 10;
     $('#ogMeta').textContent = `共 ${s.chapterCount || 0} 章 · 有大纲 ${s.outlineCount || 0} · 有正文 ${s.bodyCount || 0}`;
-    // 加载 VIP 状态
+    // 加载 VIP 状态（开关 + 已授权读者数；不再有任何“VIP 密码”）
     const vip = await api(`/novels/${enc(id)}/vip`);
-    $('#vipMeta').textContent = vip.vip ? '✅ 当前为 VIP 小说' : '未设置 VIP';
-    $('#vipPassword').value = '';
+    $('#vipOn').checked = !!vip.vip;
+    const grants = (vip.grants || []).filter(g => g.active);
+    $('#vipMeta').textContent = vip.vip
+      ? `当前为 VIP 小说 · 已授权 ${grants.length} 个账号${grants.length ? '：' + grants.map(g => g.username).join('、') : ''}`
+      : '未开启 VIP，所有登录读者可直接阅读';
   } catch (e) { showResult('读取设定失败：' + e.message, 'err'); }
 }
 
@@ -287,26 +566,52 @@ $('#saveSettings').onclick = async () => {
   if (!$('#setName').value.trim()) return showResult('书名不能为空', 'err');
   showLoading('保存设定中…');
   try {
-    const r = await api(`/novels/${enc(id)}/settings`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: $('#setName').value, outline: $('#setOutline').value, content: $('#setContent').value, preface: $('#setPreface').value }) });
-    showResult(`✅ 设定已保存（${r.action}${r.version ? ' v' + r.version : ''}）`, 'ok');
+    const next = readWordCfg();
+    const dirty = !!wordCfgLoaded && (next.targetWords !== wordCfgLoaded.targetWords
+      || next.tolerancePct !== wordCfgLoaded.tolerancePct
+      || next.splitPct !== wordCfgLoaded.splitPct
+      || next.overflow !== wordCfgLoaded.overflow);
+    const body = { name: $('#setName').value, outline: $('#setOutline').value, content: $('#setContent').value, preface: $('#setPreface').value };
+    if (dirty) body.genCfg = next;
+    const r = await api(`/novels/${enc(id)}/settings`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    let msg = `✅ 设定已保存（${r.action}${r.version ? ' v' + r.version : ''}）`;
+    if (dirty) {
+      const b = r.wordBand || {};
+      msg += b.on ? `・每章目标 ${b.target} 字，合格 ${b.min}–${b.max} 字・超长时${next.overflow === 'split' ? '拆成更多章' : '删减次要场景'}` : '・已取消每章字数限制';
+      // 设定只管之后的生成；不把这句说清楚，人会以为保存完存量章就自动变均匀了
+      if (b.on) msg += '\n（只影响今后生成的章；已有章节请用菜单「📏 字数治理」处理）';
+      // 自由扩展会动书结构，这一句必须在保存成功的当下就说，不能等拆完了才发现章号变了
+      if (b.on && next.overflow === 'split') msg += '\n⚠️ 自由扩展会在超长时拆章、平移后续章号，已发布的页面需要重新发布';
+    }
+    showResult(msg, 'ok');
     loadSettings(); reloadNovels();
   } catch (e) { showResult('❌ ' + e.message, 'err'); }
 };
 
 $('#saveVip').onclick = async () => {
   const id = requireNovel(); if (!id) return;
-  const pwd = $('#vipPassword').value.trim();
-  showLoading('保存 VIP 设置中…');
+  const on = $('#vipOn').checked;
+  if (on && !confirm('开启后，未获授权的读者（包括已登录的）将读不到本书。\n确认？')) return;
+  showLoading('保存 VIP 开关中…');
   try {
-    if (pwd) {
-      await api(`/novels/${enc(id)}/vip`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pwd }) });
-      showResult('✅ VIP 已开启，读者需输入密码才能阅读', 'ok');
-    } else {
-      await api(`/novels/${enc(id)}/vip`, { method: 'DELETE' });
-      showResult('✅ VIP 已取消，小说可自由阅读', 'ok');
-    }
+    await api(`/novels/${enc(id)}/vip`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vip: on }) });
+    showResult(on ? '✅ 本书已标为 VIP（去「管理授权读者」开人）' : '✅ VIP 已关闭，小说可自由阅读', 'ok');
     loadSettings();
   } catch (e) { showResult('❌ ' + e.message, 'err'); }
+};
+$('#gotoVipAdmin').onclick = () => { location.href = BASE + '/admin/dashboard.html#vip'; };
+
+// ── 预览：不写正式目录，先到带 token 的暂存站 + 修改报告，确认后才发布 ──
+$('#flowPreview').onclick = async () => {
+  const id = requireNovel(); if (!id) return;
+  showLoading('生成预览中…（重渲染整本，不调 LLM 预生成）');
+  try {
+    const r = await api(`/novels/${enc(id)}/preview`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const url = `${BASE}/admin/preview.html?novel=${enc(id)}&token=${enc(r.token)}`;
+    const w = window.open(url, '_blank');
+    if (!w) location.href = url;                       // 弹窗被拦就在当前页打开
+    showResult(`✅ 预览已生成（${r.chapterCount} 页），暂存 24 小时\n📖 暂存站：${location.origin + r.previewUrl}`, 'ok');
+  } catch (e) { showResult('❌ 预览失败：' + e.message, 'err'); }
 };
 
 // ── ② 生成大纲 ──
@@ -314,14 +619,126 @@ $('#genOutlines').onclick = async () => {
   const id = requireNovel(); if (!id) return;
   const total = Number($('#ogTotal').value || 0);
   if (!total || total < 1) return showResult('请填写章节总数', 'err');
-  if (!confirm(`将按当前设定生成 ${total} 章大纲（若已有大纲会被重建覆盖）。继续？`)) return;
+  const force = $('#ogForce').checked;
+  if (!force) { showResult('未勾选「确认重建」，已取消：该操作会清空命中章节的正文。若只是想加章，请用②b「批量加章」。', 'err'); return; }
+  if (!confirm(`将按当前设定重建 ${total} 章大纲，已有正文的章会被清空（不可逆，仅留旧稿快照）。确定继续？`)) return;
   showLoading(`生成 ${total} 章大纲中…（LLM 调用，可能需数十秒）`);
   try {
-    const r = await api('/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'generateChapterOutlines', novelId: id, totalChapters: total }) });
+    const r = await api('/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'generateChapterOutlines', novelId: id, totalChapters: total, force: true }) });
     showResult(r.result || '✅ 大纲已生成', 'ok');
     await Promise.all([loadChapters(), loadSettings()]);
   } catch (e) { showResult('❌ ' + e.message, 'err'); }
 };
+
+// ── ②b 加章 / 补大纲：三种方式共用一个提交按钮，差别只在组哪几个参数 ──
+const BK_HINT = {
+  manual: '大纲为必填（无大纲的章不会被生成正文）；标题可留空。加入后用 ③ 的「区间生成正文」只补写这些新章。',
+  auto: '先按上面的位置插入占位章，再逐章把大纲写进去（已有大纲的章不会被碰）。适合手里只有素材、还没想好每章写什么。',
+  fill: '只处理区间内大纲为空的章，已有大纲与正文一律不动；区间留空 = 全书扫描找空位。',
+};
+
+function bkSyncMode() {
+  const m = $('#bkMode').value;
+  $('#bkManualWrap').style.display = m === 'manual' ? '' : 'none';
+  $('#bkAutoWrap').style.display = m === 'auto' ? '' : 'none';
+  $('#bkFillWrap').style.display = m === 'fill' ? '' : 'none';
+  // 回填模式不插章，锚点无意义（留着会被误以为能移动章节）
+  $('#bkAnchorWrap').style.display = m === 'fill' ? 'none' : '';
+  $('#bkAfterWrap').style.display = (m !== 'fill' && $('#bkAnchor').value === 'after') ? '' : 'none';
+  $('#bkGo').textContent = m === 'manual' ? '📚 加入目录' : '🧩 补写大纲';
+  $('#bkHint').textContent = BK_HINT[m];
+}
+
+/** 锚点归集（manual 与 auto 共用）：返回 { anchor, at }，非法时返回 { err } */
+function bkAnchor() {
+  if ($('#bkAnchor').value !== 'after') return { anchor: null, at: '末尾' };
+  const v = $('#bkAfter').value;
+  if (v === '' || Number(v) < 0) return { err: '请填写锚点章号（0 = 插到全书最前面）' };
+  return { anchor: { mode: 'after', no: Number(v) }, at: `第 ${Number(v)} 章之后` };
+}
+
+function bkAppend() {
+  const d = document.createElement('div');
+  d.innerHTML = `<div class="field"><label>标题</label><input class="bk-name" type="text" placeholder="可留空"></div>
+    <div class="field"><label>章节大纲 *</label><textarea class="bk-outline" placeholder="本章发生什么（批量生成正文只看这段）"></textarea></div>`;
+  $('#bkRows').appendChild(d);
+  bkRenumber();
+}
+
+/** 行号只跟随实际行数列重新标，避免删中间行后编号跳号 */
+function bkRenumber() {
+  [...$('#bkRows').children].forEach((el, i) => {
+    const lb = el.querySelector('label');
+    if (lb) lb.textContent = `新章 ${i + 1} · 标题`;
+  });
+}
+
+function bkTrim() {
+  const box = $('#bkRows');
+  if (box.children.length > 1) box.removeChild(box.lastElementChild);
+  bkRenumber();
+}
+
+$('#bkMode').onchange = bkSyncMode;
+$('#bkAnchor').onchange = bkSyncMode;
+$('#bkAdd').onclick = bkAppend;
+$('#bkSub').onclick = bkTrim;
+$('#bkGo').onclick = async () => {
+  const id = requireNovel(); if (!id) return;
+  const mode = $('#bkMode').value;
+  const body = { novelId: id };
+  let loading = '';
+
+  if (mode === 'manual') {
+    const chapters = [...$('#bkRows').children].map(el => ({
+      name: (el.querySelector('.bk-name').value || '').trim(),
+      outline: (el.querySelector('.bk-outline').value || '').trim(),
+    })).filter(c => c.outline);
+    const typed = [...$('#bkRows').children].length;
+    if (typed > chapters.length && !confirm(`有 ${typed - chapters.length} 行没填大纲，将被忽略。继续？`)) return;
+    if (!chapters.length) return showResult('至少写一章大纲（无大纲的章不会被生成正文，只会留下一页空白）', 'err');
+    const a = bkAnchor(); if (a.err) return showResult(a.err, 'err');
+    body.action = 'addChaptersBulk';
+    body.chapters = chapters;
+    if (a.anchor) body.anchor = a.anchor;
+    loading = `加入 ${chapters.length} 章大纲（${a.at}）…`;
+  } else if (mode === 'auto') {
+    const n = Number($('#bkCount').value);
+    if (!Number.isInteger(n) || n < 1 || n > 50) return showResult('新增章数需为 1–50 的整数', 'err');
+    const a = bkAnchor(); if (a.err) return showResult(a.err, 'err');
+    body.action = 'generateOutlinesForRange';
+    body.count = n;
+    const material = ($('#bkMaterial').value || '').trim();
+    if (material) body.material = material;
+    if (a.anchor) body.anchor = a.anchor;
+    loading = `插入 ${n} 章并逐章补大纲（${a.at}）… 一章一次模型调用，可能要等几分钟`;
+  } else {
+    const from = $('#bkFrom').value, to = $('#bkTo').value;
+    if (from !== '' && to !== '' && Number(from) > Number(to)) return showResult('起始章号不能大于结束章号', 'err');
+    if (from === '' && to === '' && !confirm('未限定区间：将扫描全书，最多补 50 章大纲（逐章调用模型，可能耗时很久）。确定继续？')) return;
+    body.action = 'generateOutlinesForRange';
+    if (from !== '') body.from = Number(from);
+    if (to !== '') body.to = Number(to);
+    loading = '扫描区间内空缺的大纲并逐章补写…';
+  }
+
+  showLoading(loading);
+  try {
+    const r = await api('/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    showResult(r.result || '✅ 已完成', 'ok');
+    if (mode === 'manual') {
+      [...$('#bkRows').children].forEach(el => {
+        el.querySelector('.bk-name').value = '';
+        el.querySelector('.bk-outline').value = '';
+      });
+    }
+    await Promise.all([loadChapters(), loadSettings()]);
+  } catch (e) { showResult('❌ ' + e.message, 'err'); }
+};
+
+// 默认先摆 3 行：一次加几章是常见动作，不要让人到处找入口
+bkAppend(); bkAppend(); bkAppend();
+bkSyncMode();
 
 // ── ③ 章节列表 ──
 async function loadChapters() {
@@ -336,6 +753,9 @@ async function loadChapters() {
 }
 
 function yn(b) { return b ? '<span class="y">✓</span>' : '<span class="n">✗</span>'; }
+// 字数口径同服务端：LENGTH(content)，也就是含换行与 Markdown 符号的存储字符数，
+// 与生成结果里那句「字数: N 字」（content.length）是同一个数，不另算一套。
+function wcText(n) { const v = Number(n) || 0; return v >= 10000 ? (v / 10000).toFixed(1) + '万字' : v + '字'; }
 function renderChapters() {
   const total = CHAPS.length;
   const pages = Math.max(1, Math.ceil(total / PER));
@@ -344,54 +764,223 @@ function renderChapters() {
   $('#chList').innerHTML = slice.length ? slice.map(c => `
     <div class="ch-row" data-no="${c.no}">
       <div class="t"><span class="no">第${c.no}章</span>${escapeHtml(c.name || '（无标题）')}</div>
-      <div class="tag">纲 ${yn(!!(c.outline && String(c.outline).trim()))} 文 ${yn(c.hasContent)}</div>
+      <div class="tag">纲 ${yn(!!(c.outline && String(c.outline).trim()))} 文 ${yn(c.hasContent)}<span class="wc">${c.hasContent ? wcText(c.wordCount) : '—'}</span></div>
     </div>`).join('') : '<div class="loading">暂无章节，先在②生成大纲</div>';
   $('#chList').querySelectorAll('.ch-row').forEach(row => row.onclick = () => openChapter(Number(row.dataset.no)));
-  $('#chPager').innerHTML = `<button id="pgPrev" ${page <= 0 ? 'disabled' : ''}>‹ 上一页</button><span>第 ${page + 1}/${pages} 页 · 共 ${total} 章</span><button id="pgNext" ${page >= pages - 1 ? 'disabled' : ''}>下一页 ›</button>`;
+  $('#chPager').innerHTML = `<button id="pgPrev" ${page <= 0 ? 'disabled' : ''}>‹ 上一页</button><span>第 ${page + 1}/${pages} 页 · 共 ${total} 章 · 正文 ${wcText(CHAPS.reduce((s, c) => s + (Number(c.wordCount) || 0), 0))}</span><button id="pgNext" ${page >= pages - 1 ? 'disabled' : ''}>下一页 ›</button>`;
   $('#pgPrev').onclick = () => { page--; renderChapters(); };
   $('#pgNext').onclick = () => { page++; renderChapters(); };
 }
 
 function chapByNo(no) { return CHAPS.find(c => c.no === no); }
 
-async function openChapter(no) {
+// 章节弹层的现场。翻章、保存、生成草稿、生成正文都要判断「输入框是否已偏离库里那份」，
+// 而这些动作分散在几个函数里，所以状态放模块级，不放某一次 openChapter 的闭包。
+let CH = null;
+let CH_NAV = null;   // 当前章的上一章/下一章，给 ← / → 翻章用
+
+function chDirty() {
+  if (!CH) return false;
+  const n = $('#chName'), o = $('#chOutline');
+  return !!n && !!o && (n.value !== CH.base.name || o.value !== CH.base.outline);
+}
+
+function chPaintWords() {
+  const el = $('#chWords'), o = $('#chOutline');
+  if (!el || !o) return;
+  // 大纲字数看输入框而不是库里那份：正在改的时候报旧数字没有意义
+  el.textContent = `正文 ${wcText((CH && CH.bodyWords) || 0)} · 大纲 ${wcText(o.value.length)}`;
+}
+
+/**
+ * 大纲框下方的状态行：只报「有没有落库」与「能不能换回」。
+ * 生成后与保存后共用一份渲染，免得保存完了还挂着那句「还没保存」。
+ */
+function chPaintNote() {
+  const note = $('#chDraft');
+  if (!note || !CH) return;
+  const bits = [];
+  if (CH.savedAt) bits.push(`<span style="color:#27ae60">✓ ${CH.savedAt} 已保存</span>`);
+  else if (CH.undo !== null) bits.push('已填入生成的大纲，<b>还没保存</b>');
+  if (CH.undo !== null) bits.push('<button class="lbtn" id="chUndoO">↩ 换回生成前那版</button>');
+  if (CH.suggest) bits.push(`模型建议标题「${escapeHtml(CH.suggest)}」<button class="lbtn" id="chUseName">采用</button>`);
+  note.innerHTML = bits.join('　');
+  const u = $('#chUndoO'), n = $('#chUseName');
+  if (u) u.onclick = () => { const b = $('#chOutline'); if (b) b.value = CH.undo; CH.undo = null; chPaintNote(); chPaintWords(); };
+  if (n) n.onclick = () => { const el = $('#chName'); if (el) el.value = CH.suggest; };
+}
+
+// 邻居按钮上只写「下一章」三个字会让人不知道该不该点，带上标题才有翻页的感觉
+function chPeerLabel(c) {
+  const t = String(c.name || '').trim();
+  const short = t.length > 10 ? t.slice(0, 10) + '…' : t;
+  return short ? `${c.no}章·${short}` : `第${c.no}章`;
+}
+
+/**
+ * 打开（或原地切到）某章的编辑弹层。
+ * dir='next'|'prev' 决定入场方向，让「上一章/下一章」不只是数字变了。
+ */
+async function openChapter(no, dir) {
   const id = requireNovel(); if (!id) return;
-  const c = chapByNo(no) || {};
+  const idx = CHAPS.findIndex(c => c.no === no);
+  const c = idx >= 0 ? CHAPS[idx] : (chapByNo(no) || {});
+  const prev = idx > 0 ? CHAPS[idx - 1] : null;
+  const next = idx >= 0 && idx < CHAPS.length - 1 ? CHAPS[idx + 1] : null;
+  // 背后的列表跟着翻到本章所在页：否则看着第 60 章翻了半天，关掉弹层还停在第 1 页
+  if (idx >= 0) { page = Math.floor(idx / PER); renderChapters(); }
   const s = $('#sheet');
+  CH = { no, bodyWords: Number(c.wordCount) || 0, base: { name: c.name || '', outline: c.outline || '' }, undo: null, suggest: '', savedAt: '' };
   s.innerHTML = `
+    <div class="ch-nav">
+      <button id="chPrev" ${prev ? '' : 'disabled'}>‹ ${prev ? chPeerLabel(prev) : '上一章'}</button>
+      <span class="cur">第 ${no} 章 · 共 ${CHAPS.length} 章</span>
+      <button id="chNext" ${next ? '' : 'disabled'}>${next ? chPeerLabel(next) : '下一章'} ›</button>
+    </div>
     <h2>第${no}章</h2>
-    <div class="desc">可修改标题与大纲并保存，或按大纲生成正文。</div>
-    <div class="field"><label>章节标题</label><input id="chName" value="${escapeHtml(c.name || '')}"></div>
-    <div class="field"><label>章节大纲</label><textarea id="chOutline" class="tall">${escapeHtml(c.outline || '')}</textarea></div>
-    <div class="field"><label>正文（只读预览）</label><textarea id="chBody" class="tall" readonly placeholder="尚未生成正文"></textarea></div>
+    <div class="desc">可修改标题与大纲并保存，或按大纲生成正文。<span id="chWords"></span></div>
+    <div class="field"><label>章节标题</label><input id="chName"></div>
+    <div class="field"><label>本章构思（可选，给「生成大纲」当输入）</label><textarea id="chIdea" placeholder="想让这章发生什么、要埋什么伏笔、接住上一章的哪句话。留空则只按故事概要与前后章衔接来构思"></textarea></div>
+    <div class="field"><label>章节大纲</label><textarea id="chOutline" class="tall"></textarea></div>
+    <div class="ch-note" id="chDraft"></div>
+    <div class="field"><label>正文（只读预览）</label><textarea id="chBody" class="tall" readonly placeholder="正在加载正文…"></textarea></div>
     <div class="actions">
-      <button class="b-gray" id="chLoad">查看正文</button>
+      <button class="b-run" id="chGenO">🧭 生成大纲</button>
       <button class="b-run" id="chSaveO">保存大纲</button>
       <button class="b-ok" id="chGen">生成正文</button>
+      <button class="b-gray" id="chLoad">重新加载正文</button>
     </div>
     <div class="actions">
       <button class="b-cancel" id="chClose">关闭</button>
       <button class="b-danger" id="chDel">🗑️ 删除本章</button>
     </div>`;
+  // 标题/大纲走 JS 赋值而不是拼进模板：拼进去就要拿 HTML 再解析一遍，
+  // 换行、引号、内容里出现 </textarea> 都得靠转义兼顾；直接给 .value 不存在这层风险。
+  $('#chName').value = CH.base.name;
+  $('#chOutline').value = CH.base.outline;
   $('#mask').classList.add('show');
+  s.scrollTop = 0;
+  s.classList.remove('ch-in-next', 'ch-in-prev');
+  if (dir) { void s.offsetWidth; s.classList.add(dir === 'next' ? 'ch-in-next' : 'ch-in-prev'); }
+  chPaintWords(); chPaintNote();
+  CH_NAV = { prev, next };
   $('#chClose').onclick = closeModal;
   $('#chSaveO').onclick = () => saveOutline(no);
-  $('#chGen').onclick = () => genOne(no, false);
-  $('#chLoad').onclick = async () => {
-    try { const r = await api(`/novels/${enc(id)}/chapter/${no}`); $('#chBody').value = (r.chapter && r.chapter.content) || '（该章暂无正文）'; }
-    catch (e) { showResult('❌ ' + e.message, 'err'); }
-  };
   $('#chDel').onclick = () => delOne(no);
+  $('#chPrev').onclick = () => switchChapter(no, prev);
+  $('#chNext').onclick = () => switchChapter(no, next);
+  // 生成正文读的是库里那份大纲，不是输入框里这份：不保存直接点就是白改，
+  // 而弹层一关手打的字就没了，所以这里先问一句、默认走「保存完接着生成」。
+  $('#chGen').onclick = async () => {
+    if (chDirty()) {
+      if (!confirm(`第 ${no} 章的标题/大纲还没保存，而生成正文用的是库里已保存的版本（不是输入框里这份）。先保存再生成？`)) return;
+      if (!await saveOutline(no, { quiet: true })) return;
+    }
+    genOne(no, false);
+  };
+  // 生成大纲：结果只填进输入框、不直接落库，所以不需要「确定覆盖吗」——
+  // 填之前那份留在 CH.undo 里，点一下就换得回来；真要不保存，关掉弹层库里原样不动。
+  $('#chGenO').onclick = async () => {
+    const box = $('#chOutline'); if (!box) return;
+    const before = box.value;
+    try {
+      const r = await api(`/novels/${enc(id)}/chapter/${no}/outline-draft`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ material: String($('#chIdea').value || '').trim() }),
+      });
+      if ($('#chOutline') !== box) return;   // 等的时候翻了章，别把草稿灌进下一章的框
+      box.value = r.outline;
+      CH.undo = before; CH.suggest = r.name || ''; CH.savedAt = '';
+      chPaintNote(); chPaintWords();
+    } catch (e) {
+      showResult('❌ ' + e.message, 'err');
+      chNoteError(`第 ${no} 章大纲生成失败：${e.message}`, no);
+    }
+  };
+  // 保存之后又动了笔，那句「已保存」就成了假信息
+  const markEdited = () => {
+    if (CH && CH.savedAt && chDirty()) { CH.savedAt = ''; chPaintNote(); }
+    chPaintWords();
+  };
+  $('#chOutline').addEventListener('input', markEdited);
+  $('#chName').addEventListener('input', markEdited);
+  // “只读预览”应当打开就有内容：以前空着显示“尚未生成正文”，把这四个字读成一个事实判断
+  // （“这章还没写”），而它本意只是“还没加载”。现在打开即拉一次单章（只读一章，不是整本）。
+  const loadBody = async () => {
+    const box = $('#chBody');
+    if (!box) return;
+    box.value = ''; box.placeholder = '正在加载正文…';
+    try {
+      const r = await api(`/novels/${enc(id)}/chapter/${no}`);
+      // 快速翻章时旧请求会晚到，不校一下就把上一章的正文写进下一章的框里
+      if ($('#chBody') !== box) return;
+      box.value = (r.chapter && r.chapter.content) || '（该章暂无正文）';
+      box.placeholder = '';
+      if (r.chapter) { CH.bodyWords = Number(r.chapter.wordCount) || 0; chPaintWords(); }
+    } catch (e) {
+      if ($('#chBody') !== box) return;
+      box.placeholder = '加载失败，点“重新加载正文”重试';
+      showResult('❌ ' + e.message, 'err');
+    }
+  };
+  $('#chLoad').onclick = loadBody;
+  loadBody();
 }
 
-async function saveOutline(no) {
-  const id = requireNovel(); if (!id) return;
-  showLoading(`保存第 ${no} 章大纲…`);
+/**
+ * 把失败写进弹层里那一行。不能只走 showResult：弹层是全屏的，背后的结果区根本看不到，
+ * 而“等了一分多钟输入框纹丝不动”与“保存已经成功了”都会被当成点了没反应。
+ * 校一下章号：旧请求晚回来时，不能把上一章的错写到下一章脸上。
+ */
+function chNoteError(text, no) {
+  const note = $('#chDraft');
+  if (note && CH && CH.no === no) note.innerHTML = `<span style="color:#c0392b">⛔ ${escapeHtml(text)}</span>`;
+}
+
+/** 翻章前拦住未保存的改动：弹层是原地重绘的，一丢没有第二次机会 */
+async function switchChapter(fromNo, target) {
+  if (!target) return;
+  if (chDirty() && !confirm(`第 ${fromNo} 章的标题/大纲还没保存，切到第 ${target.no} 章会丢掉这些改动。仍要切换？`)) return;
+  await openChapter(target.no, target.no > fromNo ? 'next' : 'prev');
+}
+
+// ← / → 翻章。只在章节弹层开着、焦点不在输入框、且没有更上层的 OK 确认时生效，
+// 否则就是在抢光标移动和确认输入。
+document.addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey || !CH_NAV || !CH) return;
+  if (!$('#mask').classList.contains('show') || $('#okMask').classList.contains('show')) return;
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+  const target = e.key === 'ArrowLeft' ? CH_NAV.prev : e.key === 'ArrowRight' ? CH_NAV.next : null;
+  if (!target) return;
+  e.preventDefault();
+  switchChapter(CH.no, target);
+});
+
+/**
+ * 保存标题+大纲。成功后**不再自动关弹层**：有了上一章/下一章，「改一章→翻下一章」
+ * 是连续动作，每次都得重开太碎。反馈因此改到弹层内联——背后的结果区被弹层盖着，
+ * 只写 showResult 等于没说。
+ * @returns {Promise<boolean>} 是否已落库（调用方据此决定要不要接着跑生成）
+ */
+async function saveOutline(no, opt = {}) {
+  const id = requireNovel(); if (!id) return false;
+  const nameEl = $('#chName'), outEl = $('#chOutline');
+  if (!nameEl || !outEl) return false;
+  const name = nameEl.value, outline = outEl.value;
+  if (!opt.quiet) showLoading(`保存第 ${no} 章大纲…`);
   try {
-    await api(`/novels/${enc(id)}/chapter/${no}/outline`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: $('#chName').value, outline: $('#chOutline').value }) });
+    await api(`/novels/${enc(id)}/chapter/${no}/outline`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, outline }) });
     showResult(`✅ 第 ${no} 章大纲已保存`, 'ok');
-    closeModal(); loadChapters(); loadSettings();
-  } catch (e) { showResult('❌ ' + e.message, 'err'); }
+    if (CH && CH.no === no) { CH.base = { name, outline }; CH.savedAt = new Date().toTimeString().slice(0, 8); chPaintNote(); }
+    loadChapters(); loadSettings();
+    return true;
+  } catch (e) {
+    showResult('❌ ' + e.message, 'err');
+    // 不写在弹层里，用户看到的就是“按了保存但什么也没发生”，下一翻章还会被“未保存”拦一次
+    chNoteError(`第 ${no} 章保存失败：${e.message}`, no);
+    return false;
+  }
 }
 
 async function genOne(no, force) {
@@ -407,12 +996,17 @@ async function genOne(no, force) {
 
 async function delOne(no) {
   const id = requireNovel(); if (!id) return;
-  if (!confirm(`确定删除第 ${no} 章？后续章节会自动重排编号，不可撤销。`)) return;
+  const c = chapByNo(no) || {};
+  const named = c.name ? `「${escapeHtml(String(c.name))}」` : '（无标题）';
+  if (!await askOk({
+    title: `🗑️ 删除第 ${no} 章`,
+    desc: `将永久删除第 ${no} 章 ${named} 的大纲与正文，后续章节自动重排编号，不可撤销。`,
+  })) return;
   closeModal();
   try {
-    await api(`/novels/${enc(id)}/chapter/${no}`, { method: 'DELETE' });
+    await api(`/novels/${enc(id)}/chapter/${no}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm: 'OK' }) });
     showResult(`🗑️ 已删除第 ${no} 章（后续自动重排）`, 'ok');
-    loadChapters(); loadSettings();
+    loadChapters(); loadSettings(); reloadNovels();
   } catch (e) { showResult('❌ ' + e.message, 'err'); }
 }
 
@@ -427,16 +1021,24 @@ $('#rangeGen').onclick = async () => {
   if (!from || !to || from < 1 || to < from) return showResult('区间范围不合法', 'err');
   if (to - from > 100 && !confirm(`将逐章生成 ${from}–${to}（共 ${to - from + 1} 章），耗时很长，确定？`)) return;
   startProgress(`✍️ 区间生成正文 ${from}–${to}${force ? '（覆盖）' : '（跳过已有）'}\n`);
+  // 整个循环持有遮罩（而不是每章开关一次），同时让逐章的服务端进度能流进遮罩。
+  // 必须 try/finally 释放：中途抛异常不释放的话遮罩会永久盖住页面，比没有遮罩更糟。
+  const releaseBusy = busyHold(`✍️ 区间生成正文 第 ${from}–${to} 章`);
   let ok = 0, skip = 0, fail = 0;
-  for (let ch = from; ch <= to; ch++) {
-    const c = chapByNo(ch);
-    if (!c) { dockLine(`第${ch}章：不存在，跳过`); skip++; continue; }
-    if (!force && c.hasContent) { dockLine(`第${ch}章：已有正文，跳过`); skip++; continue; }
-    if (!(c.outline && String(c.outline).trim())) { dockLine(`第${ch}章：无大纲，跳过`); skip++; continue; }
-    dockLine(`第${ch}章：生成中…`);
-    try { await api('/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'generate', novelId: id, chapter: ch, force }) }); dockLine(`第${ch}章：✅ 完成`); ok++; }
-    catch (e) { dockLine(`第${ch}章：❌ ${e.message}`); fail++; }
-    await loadChaptersQuiet();
+  try {
+    for (let ch = from; ch <= to; ch++) {
+      const c = chapByNo(ch);
+      if (!c) { dockLine(`第${ch}章：不存在，跳过`); skip++; continue; }
+      if (!force && c.hasContent) { dockLine(`第${ch}章：已有正文，跳过`); skip++; continue; }
+      if (!(c.outline && String(c.outline).trim())) { dockLine(`第${ch}章：无大纲，跳过`); skip++; continue; }
+      dockLine(`第${ch}章：生成中…`);
+      busyLine(`第${ch}章：开始生成…`);
+      try { await api('/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'generate', novelId: id, chapter: ch, force }) }); dockLine(`第${ch}章：✅ 完成`); ok++; }
+      catch (e) { dockLine(`第${ch}章：❌ ${e.message}`); fail++; }
+      await loadChaptersQuiet();
+    }
+  } finally {
+    releaseBusy();
   }
   dockLine(`\n合计：成功 ${ok} · 跳过 ${skip} · 失败 ${fail}`);
   loadChapters(); loadSettings();
@@ -451,10 +1053,18 @@ $('#rangeDel').onclick = async () => {
   const id = requireNovel(); if (!id) return;
   const from = Number($('#rgFrom').value), to = Number($('#rgTo').value);
   if (!from || !to || from < 1 || to < from) return showResult('区间范围不合法', 'err');
-  if (!confirm(`确定删除第 ${from}–${to} 章（共 ${to - from + 1} 章）？删除后自动重排编号，不可撤销。`)) return;
+  if (!await askOk({
+    title: '🗑️ 区间删除章节',
+    desc: `将永久删除第 ${from}–${to} 章（共 ${to - from + 1} 章），后续章节自动重排编号，不可撤销。`,
+  })) return;
   startProgress(`🗑️ 区间删除 ${from}–${to}\n`);
+  /* 整批只确认一次：逐章都弹的话，删 20 章就要输 20 遍 OK，等于不可用。
+   * 但服务端那道校验不打折 —— 循环里每一章的请求仍各自带着 confirm:'OK'。 */
   for (let ch = to; ch >= from; ch--) {
-    try { await api(`/novels/${enc(id)}/chapter/${ch}`, { method: 'DELETE' }); dockLine(`第${ch}章：已删除`); }
+    try {
+      await api(`/novels/${enc(id)}/chapter/${ch}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm: 'OK' }) });
+      dockLine(`第${ch}章：已删除`);
+    }
     catch (e) { dockLine(`第${ch}章：❌ ${e.message}`); }
   }
   dockLine('\n删除完成，已重排编号。');
@@ -493,15 +1103,22 @@ function renderMenu() {
 function fieldsFor(key) {
   switch (key) {
     case 'saveNovelPlan': return [{ n: 'info.name', l: '小说名称', t: 'text', req: 1 }, { n: 'info.outline', l: '故事简介', t: 'area' }, { n: 'info.content', l: '角色/世界观设定', t: 'area' }];
-    case 'generateChapterOutlines': return [{ n: 'totalChapters', l: '章节总数', t: 'number', def: 10 }];
+    case 'generateChapterOutlines': return [{ n: 'totalChapters', l: '章节总数', t: 'number', def: 10 }, { n: 'force', l: '确认重建（清空命中章正文）', t: 'bool' }];
     case 'addChapterOutline': return [{ n: 'info.no', l: '插入位置(章号)', t: 'number' }, { n: 'info.name', l: '章节标题', t: 'text' }, { n: 'info.outline', l: '章节大纲', t: 'area' }];
+    case 'addChaptersBulk': return [{ n: 'chapters', l: '新章节清单', t: 'json', req: 1, def: '[{"name":"第十一章","outline":"本章发生什么…"}]' }, { n: 'anchor', l: '插入位置（省略=末尾追加）', t: 'json', def: '{"mode":"tail"}' }];
+    case 'generateOutlinesForRange': return [{ n: 'count', l: '新增章数（与 from/to 互斥）', t: 'number' }, { n: 'from', l: '起始章号（只回填时用）', t: 'number' }, { n: 'to', l: '结束章号（只回填时用）', t: 'number' }, { n: 'anchor', l: '插入位置（省略=末尾追加）', t: 'json', def: '{"mode":"tail"}' }, { n: 'material', l: '本段素材/构思', t: 'area' }];
     case 'updateChapterOutline': return [{ n: 'info.no', l: '章号', t: 'number', req: 1 }, { n: 'info.name', l: '章节标题', t: 'text' }, { n: 'info.outline', l: '章节大纲', t: 'area' }];
     case 'generate': return [{ n: 'chapter', l: '章号(0=批量补缺)', t: 'number', def: 0 }, { n: 'force', l: '覆盖已有正文', t: 'bool' }];
     case 'add': return [{ n: 'chapter', l: '章号(留空=末尾追加)', t: 'number' }, { n: 'info.name', l: '章节标题', t: 'text' }, { n: 'info.content', l: '章节正文', t: 'area', req: 1 }];
     case 'modify': return [{ n: 'chapter', l: '章号', t: 'number', req: 1 }, { n: 'modifyInstructions', l: '修改要求', t: 'area', req: 1 }];
     case 'delete': return [{ n: 'chapter', l: '章号', t: 'number', req: 1 }];
     case 'savePreface': return [{ n: 'preface', l: '设定说明(Markdown)', t: 'area', req: 1 }];
-    case 'setParts': return [{ n: 'parts', l: '分部 JSON', t: 'json', def: '[{"name":"第一部","from":1,"to":5}]' }];
+    case 'setParts': return [{ n: 'parts', l: '各部划分', t: 'partrows' }];
+    // 字数设定：三个框全留空就是不传 genCfg，等于只读查看当前生效区间
+    case 'setGenConfig': return [{ n: 'genCfg.targetWords', l: '每章目标字数（0=不限，留空=不改）', t: 'number' }, { n: 'genCfg.tolerancePct', l: '允许浮动 %（5–50，默认 20）', t: 'number' }, { n: 'genCfg.splitPct', l: '超目标多少建议拆章 %（20–300，默认 60）', t: 'number' }];
+    // dryRun 做成显式下拉且开头就是「只看清单」：用 bool 的话不勾就是 false，
+    // 一点执行就直接开始改正文，预览等于白做
+    case 'tuneWordCount': return [{ n: 'dryRun', l: '执行方式', t: 'select', opts: [{ v: 'true', l: '只看清单（不改动任何东西）' }, { v: 'false', l: '实际执行（改写正文，超拆章线的章会被拆成两章）' }] }, { n: 'from', l: '起始章号（留空=全书）', t: 'number' }, { n: 'to', l: '结束章号（留空=全书）', t: 'number' }];
     case 'generatePartIntros': return [{ n: 'partNo', l: '部序号(留空=全部)', t: 'number' }];
     case 'updateNovelPlan': return [{ n: 'modificationType', l: '修改类型', t: 'select', opts: ['updateNovelInfo', 'updateChapterOutline', 'addChapterOutline', 'deleteChapter', 'reNumberChapters'] }, { n: 'info', l: 'info JSON', t: 'json', def: '{}' }];
     default: return [];
@@ -528,8 +1145,42 @@ async function runSimple(key, label) {
   } catch (e) { showResult('❌ ' + e.message, 'err'); }
 }
 
+/**
+ * 发布前确认（只需点一下，不要求输 OK）。服务端有意不拦（见 routes.js
+ * 「不强制未预览不能发布」那条决策），所以这道确认的全部价值在于“把读者将
+ * 看到什么摊开”——空泛地问一句“确定发布吗”没有任何信息量。
+ * 书名取 /share 的 title（那就是发布目录名），拿不到则回落选框文案；章数取已加载的
+ * 章节列表，没加载就先拉一次。任何一步探测失败都只是少说一行，不拦发布。
+ */
+async function confirmPublish(id) {
+  const lines = [];
+  let name = '';
+  try {
+    const sh = await api(`/novels/${enc(id)}/share`);
+    name = sh.title || '';
+    lines.push(sh.published
+      ? '线上已有本书，发布会直接覆盖读者正在看的页面；本次不再产出的旧章节页会被删掉'
+      : '线上尚无此书，这次是首次发布');
+  } catch {
+    name = $('#novelSel').selectedOptions[0]?.textContent || '';
+  }
+  if (!CHAPS.length) {
+    try { CHAPS = (await api(`/novels/${enc(id)}/chapters`)).chapters || []; } catch { /* 拿不到章数就不提 */ }
+  }
+  if (CHAPS.length) {
+    // 占位章的判据与 publish.js 一致：isPlaceholder = !(content && content.trim())
+    const ph = CHAPS.filter((c) => !c.hasContent).length;
+    lines.push(ph
+      ? `共 ${CHAPS.length} 章，其中 ${ph} 章还没有正文——会被发成「本章尚未完成」的占位页`
+      : `共 ${CHAPS.length} 章，正文齐全`);
+  }
+  lines.push('发布要逐章跑推理预生成，可能要几十秒');
+  return confirm(`🚀 发布《${name || '未命名'}》\n\n· ${lines.join('\n· ')}`);
+}
+
 async function doPublish() {
   const id = requireNovel(); if (!id) return;
+  if (!await confirmPublish(id)) return;
   showLoading('发布中，生成静态页…');
   try {
     const r = await api(`/novels/${enc(id)}/publish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
@@ -561,8 +1212,153 @@ async function copyText(text) {
   if (!ok) throw new Error('浏览器不允许自动复制，请长按/右键手动复制上面的链接');
 }
 
-function openParamSheet(key, label, desc, fields) {
+// ── 「划分部」的输入行：只填「部名 + 到第几章」，起始章自动衔接 ──
+// 后端（_normalizePartsInput）要求各部连续覆盖第 1 章到末章、不得重叠，
+// 所以 from 本来就没有自由度——让人只填 to 既少输入量，也不会再撞上“有缺口”报错。
+const PT_CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+const ptLabel = (i) => `第${PT_CN[i] || (i + 1)}部`;
+
+/**
+ * 读末章号与现有分部，用来预填「划分部」弹窗。
+ * 区间一律由后端从 content.part_no 聚合派生，所以两部“重叠”在结构上不可能，只有缺口需要提醒。
+ */
+async function loadPartDefaults() {
+  const out = { maxNo: 0, rows: null, note: '' };
+  const id = requireNovelSilent(); if (!id) return out;
+  if (!CHAPS.length) {
+    try { const r = await api(`/novels/${enc(id)}/chapters`); CHAPS = r.chapters || []; } catch { return out; }
+  }
+  out.maxNo = CHAPS.reduce((m, c) => Math.max(m, Number(c.no) || 0), 0);
+  try {
+    const r = await api(`/novels/${enc(id)}/parts`);
+    const all = r.parts || [];
+    // 没分到章的部（区间为空）无法用行表达，单独提醒：它会被移除、连带它的导言
+    const parts = all.filter(p => Number(p.endNo) >= 1);
+    const dropped = all.length - parts.length;
+    if (!parts.length) {
+      out.note = dropped ? `当前没有已覆盖章节的部（另有 ${dropped} 个空部，执行后会被移除）。` : '本书当前没有分部。';
+      return out;
+    }
+    out.rows = parts.map(p => ({ name: p.name || '', to: String(p.endNo) }));
+    const gaps = [];
+    let cursor = 1;
+    for (const p of parts) {
+      for (let n = cursor; n < Number(p.startNo); n++) gaps.push(n);
+      cursor = Number(p.endNo) + 1;
+    }
+    for (let n = cursor; n <= out.maxNo; n++) gaps.push(n);
+    const bits = [`已按当前 ${parts.length} 个部预填：只改部名就是纯改名（区间不变则导言不丢）`];
+    if (gaps.length) bits.push(`但第 ${gaps.join('、')} 章现在不属于任何部，执行后会被并入后面的部`);
+    if (dropped) bits.push(`另有 ${dropped} 个空部将被移除（含其导言）`);
+    out.note = bits.join('；') + '。';
+    return out;
+  } catch (e) {
+    out.note = '未能读取现有分部，已改用默认两段。';
+    return out;
+  }
+}
+
+function ptReadRows(box) {
+  return [...box.querySelectorAll('[data-ptrow]')].map(el => ({
+    name: el.querySelector('.pt-name').value,
+    to: (el.querySelector('.pt-to').value || '').trim(),
+  }));
+}
+
+/**
+ * 由「每部只填结束章」推出完整区间。
+ * 预览与提交共用这一份算法，两边口径不会打架（所见即所得）。
+ */
+function ptDerive(rows, maxNo) {
+  const list = [];
+  let cursor = 1;
+  rows.forEach((r, i) => {
+    const raw = String(r.to ?? '').trim();
+    let to = raw === '' ? null : Number(raw);
+    if (to !== null && (!Number.isInteger(to) || to < cursor)) {
+      const hint = i > 0 ? `（前面已划到第 ${cursor - 1} 章）` : '（第 1 部从第 1 章开始）';
+      throw new Error(`${ptLabel(i)}的结束章不合法：需为 ≥ ${cursor} 的整数${hint}`);
+    }
+    if (to === null && i !== rows.length - 1) throw new Error('只有最后一部可以把结束章留空（留空＝到全书最后一章）');
+    // 章数未知时不能拿 cursor 充数：那会凑出一个“假装知道区间”的预览
+    if (to === null) {
+      if (!maxNo) throw new Error(`读不到本书章数，请为${ptLabel(i)}填写结束章`);
+      to = maxNo;
+    }
+    list.push({ name: String(r.name || '').trim(), from: cursor, to });
+    cursor = to + 1;
+  });
+  if (!list.length) throw new Error('至少划一个部');
+  if (maxNo) {
+    const last = list[list.length - 1];
+    if (last.to > maxNo) throw new Error(`最后一部填到第 ${last.to} 章，但本书当前只有 ${maxNo} 章`);
+    // 必须连续覆盖全书：末部没填到末章就收到末章（预览里同一条算法，所以提前看得到）
+    last.to = maxNo;
+  }
+  return list;
+}
+
+function ptPreview(box, rows, maxNo) {
+  const pv = box.parentNode.querySelector('.pt-pv');
+  if (!pv) return;
+  // 清除也是一等公民：以前只能手填 []，改成输入框后不给个明确入口就丢了能力
+  if (box.dataset.clear === '1') {
+    pv.innerHTML = `<span class="n">⚠ 执行后将清除全部分部（仅解除归属，不删任何正文；可重新划分）</span>`;
+    return;
+  }
+  try {
+    const list = ptDerive(rows, maxNo);
+    let txt = list.map((p, i) => `${ptLabel(i)} ${p.from}–${p.to}（${p.to - p.from + 1}章）`).join('　');
+    const lastTo = rows.length ? Number(rows[rows.length - 1].to) : NaN;
+    if (maxNo && (rows.length === 0 || rows[rows.length - 1].to === '' || lastTo < maxNo)) {
+      txt += `　<span class="y">末部已收到第 ${maxNo} 章</span>`;
+    }
+    pv.innerHTML = txt;
+  } catch (e) {
+    pv.innerHTML = `<span class="n">⚠ ${escapeHtml(e.message)}</span>`;
+  }
+}
+
+function ptRender(box, rows, maxNo) {
+  box.innerHTML = rows.map((r, i) => `
+    <div class="row2" data-ptrow>
+      <div class="field"><label>${ptLabel(i)} · 部名</label><input class="pt-name" type="text" value="${escapeHtml(r.name || '')}" placeholder="留空则由系统按序号命名"></div>
+      <div class="field"><label>${ptLabel(i)} · 到第几章${i === rows.length - 1 ? '（留空＝全书末章）' : ''}</label><input class="pt-to" type="number" min="1" value="${r.to ?? ''}"></div>
+    </div>`).join('');
+  ptPreview(box, rows, maxNo);
+}
+
+function ptInit(box, maxNo, init) {
+  box.dataset.maxno = String(maxNo || '');
+  box.dataset.clear = '';
+  const half = maxNo ? Math.max(1, Math.floor(maxNo / 2)) : '';
+  // 有现状就按现状预填（纯改名不必手抄区间），没有才给默认两段
+  let rows = (init && init.rows && init.rows.length)
+    ? init.rows.map(r => ({ name: r.name || '', to: r.to }))
+    : [{ name: '', to: half }, { name: '', to: '' }];
+  const noteEl = box.parentNode.querySelector('.pt-note');
+  if (noteEl && init && init.note) noteEl.textContent = init.note;
+  const show = (next) => { rows = next; box.dataset.clear = ''; ptRender(box, rows, maxNo); };
+  const wrap = box.parentNode;
+  wrap.querySelector('[data-act="pt-add"]').onclick = () => show(ptReadRows(box).concat({ name: '', to: '' }));
+  wrap.querySelector('[data-act="pt-sub"]').onclick = () => {
+    const r = ptReadRows(box);
+    show(r.length > 1 ? r.slice(0, -1) : r);
+  };
+  // 清除靠显式按钮，并当场把预览改成“将清除全部分部”：不能让人误以为减到一行就是清空
+  wrap.querySelector('[data-act="pt-clear"]').onclick = () => {
+    box.dataset.clear = '1';
+    ptPreview(box, ptReadRows(box), maxNo);
+  };
+  box.addEventListener('input', () => { box.dataset.clear = ''; ptPreview(box, ptReadRows(box), maxNo); });
+  ptRender(box, rows, maxNo);
+}
+
+async function openParamSheet(key, label, desc, fields) {
   const s = $('#sheet');
+  // 行类字段要先拿到全书章数与现有分部，才能把区间衔接、校验与预填算出来
+  const needMax = fields.some(f => f.t === 'partrows');
+  const pd = needMax ? await loadPartDefaults() : { maxNo: 0, rows: null, note: '' };
   let html = `<h2>${label}</h2>${desc ? `<div class="desc">${desc}</div>` : ''}`;
   fields.forEach((f, i) => {
     const id = 'f_' + i;
@@ -570,12 +1366,19 @@ function openParamSheet(key, label, desc, fields) {
     else if (f.t === 'json') html += `<div class="field"><label>${f.l}（JSON）</label><textarea id="${id}" data-n="${f.n}" data-json="1">${f.def || '{}'}</textarea></div>`;
     else if (f.t === 'number') html += `<div class="field"><label>${f.l}</label><input id="${id}" data-n="${f.n}" type="number" value="${f.def ?? ''}"></div>`;
     else if (f.t === 'bool') html += `<div class="field"><label>${f.l}</label><select id="${id}" data-n="${f.n}"><option value="0">否</option><option value="1">是</option></select></div>`;
-    else if (f.t === 'select') html += `<div class="field"><label>${f.l}</label><select id="${id}" data-n="${f.n}">${f.opts.map(o => `<option>${o}</option>`).join('')}</select></div>`;
+    else if (f.t === 'select') html += `<div class="field"><label>${f.l}</label><select id="${id}" data-n="${f.n}">${f.opts.map(o => typeof o === 'string' ? `<option>${o}</option>` : `<option value="${o.v}">${o.l}</option>`).join('')}</select></div>`;
+    else if (f.t === 'partrows') html += `<div class="field"><label>${f.l}</label>
+      <div id="${id}" data-n="${f.n}"></div>
+      <div class="btns"><button class="mbtn" type="button" data-act="pt-add">＋ 加一部</button><button class="mbtn" type="button" data-act="pt-sub">－ 减一部</button><button class="mbtn danger" type="button" data-act="pt-clear">🗑 清除全部分部</button></div>
+      <div class="kv pt-pv"></div>
+      <div class="kv pt-note"></div>
+      <div class="kv">只填「到第几章」：各部起始章自动接上一部末尾（系统要求连续覆盖全书，起始章没有自由度）。部名可留空，留空时由系统按序号命名。</div></div>`;
     else html += `<div class="field"><label>${f.l}${f.req ? ' *' : ''}</label><input id="${id}" data-n="${f.n}" type="text"></div>`;
   });
   html += `<div class="actions"><button class="b-cancel" id="scancel">取消</button><button class="b-run" id="srun">执行</button></div>`;
   s.innerHTML = html;
   $('#mask').classList.add('show');
+  if (needMax) fields.forEach((f, i) => { if (f.t === 'partrows') ptInit($('#' + 'f_' + i), pd.maxNo, pd); });
   $('#scancel').onclick = closeModal;
   $('#srun').onclick = () => submitParam(key, fields);
 }
@@ -589,6 +1392,7 @@ function collect(fields) {
     if (f.t === 'bool') v = (v === '1');
     else if (f.t === 'number') v = (v === '' ? undefined : Number(v));
     else if (f.t === 'json') { try { v = JSON.parse(v || '{}'); } catch { throw new Error(f.l + ' 不是合法 JSON'); } }
+    else if (f.t === 'partrows') v = (el.dataset.clear === '1' ? [] : ptDerive(ptReadRows(el), Number(el.dataset.maxno) || 0));
     if (v === undefined || v === '') { if (f.req) throw new Error(f.l + ' 必填'); else continue; }
     const parts = f.n.split('.');
     let cur = body;
@@ -602,6 +1406,22 @@ async function submitParam(key, fields) {
   let extra;
   try { extra = collect(fields); } catch (e) { showResult('❌ ' + e.message, 'err'); closeModal(); return; }
   closeModal();
+  /* 字数治理是唯一会「批量改写已有正文 + 挪章号」的菜单动作，预览可以随手看，
+   * 执行得单独再点一次头：下拉里选到“实际执行”不等于真的看过清单。
+   * 拆章后的快照按旧章号回滚会错位（restoreChapterRevision 用 WHERE no = chapter_no），
+   * 所以那一类改动没有可靠的后悔药，只能事前确认。 */
+  if (key === 'tuneWordCount' && extra.dryRun === 'false') {
+    const range = (extra.from || extra.to) ? `第 ${extra.from ?? '未填'}–${extra.to ?? '未填'} 章` : '全书所有章节';
+    /* 文案按全书「超长处理方式」分叉：trim 模式压根不拆章，说“拆为两章、章号后移”既是吓人
+     * 也是说错；split 模式必须把章号平移说在前面。wordCfgLoaded 为空说明没读过①设定，
+     * 此时按默认 trim 措辞（保守：不承诺会发生拆章，真拆了执行结果里也会列出来）。 */
+    const splitMode = wordCfgLoaded?.overflow === 'split';
+    const desc = splitMode
+      ? `将对${range}逐章调用模型改写正文：超出合格上限的章会拆成多章、后续章号整体后移，偏短的章会自动补写，耗时可能几十分钟且中途不停。拆章后已发布的页面需重新发布。`
+      : `将对${range}逐章调用模型改写正文：超出合格上限的章会删减次要场景压回合格带（章数不变），偏短的章会自动补写，耗时可能几十分钟且中途不停。`;
+    const ok = await askOk({ title: '📏 执行字数治理', desc, btn: '确认执行' });
+    if (!ok) return;
+  }
   showLoading('执行中…（生成/检查类可能需数十秒）');
   try {
     const body = { action: key, ...extra };
@@ -652,18 +1472,26 @@ async function aiExecute(tool, argsRaw) {
   closeModal();
   showLoading(`执行 ${tool} 中…`);
   try {
-    const r = await api('/ai/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tool, args }) });
+    /* confirm:'OK' 不是多余装饰：能走到这里说明用户刚在卡片上点过「确认执行」，
+     * 那一次人工点击就是删除类工具的二次确认（服务端只认这个字段）。 */
+    const r = await api('/ai/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tool, args, confirm: 'OK' }) });
     showResult(typeof r.result === 'string' ? r.result : JSON.stringify(r.result, null, 2), 'ok');
     reloadNovels(); onNovelChange();
   } catch (e) { showResult('❌ ' + e.message, 'err'); }
 }
 
-function closeModal() { $('#mask').classList.remove('show'); }
+function closeModal() {
+  $('#mask').classList.remove('show');
+  CH_NAV = null;   // 弹层一关，← / → 就该还给页面滚动
+  $('#sheet').classList.remove('ch-in-next', 'ch-in-prev');
+}
 $('#mask').addEventListener('click', e => { if (e.target === $('#mask')) closeModal(); });
 
 function showLoading(t) { $('#resultArea').innerHTML = `<div class="grp-title">结果</div><div class="result"><div class="loading">${t}</div></div>`; }
 function showResult(t, cls) { $('#resultArea').innerHTML = `<div class="grp-title">结果</div><div class="result ${cls || ''}">${escapeHtml(t)}</div>`; }
-function escapeHtml(s) { return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+// 引号也得转义：同一个函数既填文本也填 value="…"，只处理 &<> 时一个英文引号就能把属性截断
+// （部名/标题多来自模型，带引号并不罕见）。文本节点里 &quot; 仍显示为 "，所以加宽不会伤到原有调用点。
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
 boot();
 </script>

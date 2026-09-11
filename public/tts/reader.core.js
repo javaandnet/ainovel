@@ -139,9 +139,9 @@
       '      <label>学习语言</label>',
       '      <select id="learnLang" class="tts-rate-select">',
       '        <option value="英语">英语</option>',
-      '        <option value="日语" selected>日语</option>',
+      '        <option value="日语">日语</option>',
       '        <option value="韩语">韩语</option>',
-      '        <option value="中文">中文</option>',
+      '        <option value="中文" selected>中文</option>',
       '      </select>',
       '    </div>',
       '    <div class="settings-row">',
@@ -925,6 +925,26 @@
         if (e.key === 'ArrowLeft') { goChapter(navTargets.prev); }
         else if (e.key === 'ArrowRight') { goChapter(navTargets.next); }
       });
+
+      /* 桌面端左右箭头：触屏读者有滑动与方向键，桌面读者未必知道要按键，
+         两侧各挂一个常驻箭头。是否显示交给 CSS 的 (hover) + (pointer) 判定，
+         这里只负责把链接与翻页收尾接上 goChapter（否则点箭头会漏掉撤销“本章结束”定时与
+         释放屏幕常亮，与键盘翻章行为不一致）。 */
+      ['prev', 'next'].forEach(function (dir) {
+        var a = document.createElement('a');
+        var label = dir === 'prev' ? '上一章' : '下一章';
+        a.className = 'page-arrow ' + dir;
+        a.textContent = dir === 'prev' ? '‹' : '›';
+        a.href = navTargets[dir] || '#';
+        a.title = navTargets[dir] ? (label + '（← / →）') : ('没有' + label);
+        a.setAttribute('aria-label', label);
+        if (!navTargets[dir]) { a.classList.add('off'); }
+        a.addEventListener('click', function (e) {
+          e.preventDefault();
+          goChapter(navTargets[dir]);
+        });
+        document.body.appendChild(a);
+      });
     }
 
     /* ===== 5. 音色与偏好（localStorage 持久化） ===== */
@@ -1332,7 +1352,10 @@
       try { localStorage.setItem(key, val); } catch (e) {}
     }
     function isLearnMode() { return getLearnSetting('learnMode', '0') === '1'; }
-    function learnLang() { return getLearnSetting('learnLang', '日语'); }
+    /* 默认讲解语言 = 中文：与预热好的中文词表对齐，没动过设置的读者一开页就是全黑体、秒显讲解。
+     * 选其他语种会让自动生成长得像“每次从零开始”（当时只有 45/183 个英文词有缓存）。
+     * 注意这只影响未曾存过该设置的人：localStorage 里有值时下面读不到这个兜底。 */
+    function learnLang() { return getLearnSetting('learnLang', '中文'); }
     function learnAge() { return getLearnSetting('learnAge', '9'); }
 
     function refreshLearnModeBtn() {
