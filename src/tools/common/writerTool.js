@@ -29,6 +29,38 @@ const GENERIC_DESCRIBING_NAME_RE = /^(目标小说|目标|目标库|目标文件
 // 只认一种就会在它“换了个写法”时把多章大纲当一章存下去。
 export const OUTLINE_SPLIT_MARK = '<<<SPLIT>>>';
 
+/**
+ * 格式化大纲文本：如果内容是 LLM 返回的原始 JSON（如 {"chapters":[{name,outline}], "word_count_estimate":...}
+ * 或 {"name":"...","outline":"..."}），提取其中的大纲正文并格式化为可读的纯文本；已经是纯文本则原样返回。
+ * 用于两处防御：① LLM 响应解析后兜底 ② 从数据库读取时清洗历史脏数据
+ */
+export function formatOutlineText(raw) {
+  const text = String(raw || '').trim();
+  if (!text || text[0] !== '{') return text;
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) return text;
+  let obj;
+  try { obj = JSON.parse(jsonMatch[0]); } catch { return text; }
+  // {"chapters": [{name, outline}, ...], "word_count_estimate": ...}
+  if (Array.isArray(obj?.chapters) && obj.chapters.length > 0) {
+    const parts = obj.chapters
+      .filter(c => c && String(c.outline || '').trim())
+      .map(c => {
+        const n = String(c.name || '').trim();
+        const o = String(c.outline || '').trim();
+        return n ? `${n}\n${o}` : o;
+      });
+    if (parts.length) return parts.join('\n\n');
+  }
+  // {"name": "...", "outline": "..."}
+  if (obj?.outline && typeof obj.outline === 'string' && obj.outline.trim()) {
+    const n = String(obj.name || '').trim();
+    const o = obj.outline.trim();
+    return n ? `${n}\n${o}` : o;
+  }
+  return text;
+}
+
 // 必须调模型的 action（含别名）：这些入口动笔前先做链路预检。
 // 不包含 saveNovelPlan：它只在库里没有章节大纲时才顺手生成，而且写入设定本身不该被模型不可用阻断；
 // 也不包含 updateNovelPlan：它只按 modificationType 做纯 CRUD，不碰模型（把它纳入会让服务宕机时连设定都存不了）。
@@ -2636,7 +2668,7 @@ ${outFormat}${feedback ? `\n\n## ⚠️ 上一次的问题\n${feedback}` : ''}`;
     const text = String(raw || '');
     const dfltName = chapterNo ? `第${chapterNo}章` : '';
     const one = (name, outline) => ({
-      parts: [{ name: String(name || '').trim() || dfltName, outline: String(outline || '').trim() || '（无大纲内容）' }],
+      parts: [{ name: String(name || '').trim() || dfltName, outline: formatOutlineText(String(outline || '').trim()) || '（无大纲内容）' }],
     });
     const merge = (segs, name) => one(name || segs[0]?.name, segs.map((s) => String(s.outline || s).trim()).filter(Boolean).join('\n\n'));
 
@@ -2659,7 +2691,7 @@ ${outFormat}${feedback ? `\n\n## ⚠️ 上一次的问题\n${feedback}` : ''}`;
       //（调用方靠 _isBlankOutline 判“模型未给出可用大纲”，原文当大纲会让这道判定失效）
       if (!segs.length) return one(parsed?.name || dfltName, parsed?.outline || '');
       if (!allowSplit || segs.length < 2) return merge(segs);
-      return { parts: segs.map((s, i) => ({ name: i === 0 ? (s.name || dfltName) : s.name, outline: s.outline })) };
+      return { parts: segs.map((s, i) => ({ name: i === 0 ? (s.name || dfltName) : s.name, outline: formatOutlineText(s.outline) })) };
     }
 
     // ② 单对象，outline 里可能带分隔符
@@ -2669,7 +2701,7 @@ ${outFormat}${feedback ? `\n\n## ⚠️ 上一次的问题\n${feedback}` : ''}`;
     if (outline.includes(OUTLINE_SPLIT_MARK)) {
       const segs = outline.split(OUTLINE_SPLIT_MARK).map((s) => s.trim()).filter(Boolean);
       if (!allowSplit || segs.length < 2) return one(name || dfltName, segs.join('\n\n'));
-      return { parts: segs.map((s, i) => ({ name: i === 0 ? (name || dfltName) : '', outline: s })) };
+      return { parts: segs.map((s, i) => ({ name: i === 0 ? (name || dfltName) : '', outline: formatOutlineText(s) })) };
     }
     return one(name || dfltName, outline);
   }

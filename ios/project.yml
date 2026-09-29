@@ -1,0 +1,54 @@
+# XcodeGen 工程描述（纯文本，可审阅）
+# 生成 .xcodeproj：  brew install xcodegen && cd ios && xcodegen generate
+name: AINovel
+options:
+  bundleIdPrefix: com.ainovel
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    ENABLE_USER_SCRIPT_SANDBOXING: "NO"
+    CODE_SIGN_STYLE: Automatic
+    # 开发者个人 Team（HAI ZHAO / 免费 Personal Team）；换付费账号时改这里
+    DEVELOPMENT_TEAM: K82UDVDKF7
+targets:
+  AINovel:
+    type: application
+    platform: iOS
+    sources:
+      - AINovel
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: jp.co.fsr.ainovel
+        INFOPLIST_FILE: AINovel/Info.plist
+        TARGETED_DEVICE_FAMILY: "1,2"   # 1,2 = iPhone + iPad
+    info:
+      path: AINovel/Info.plist
+      properties:
+        CFBundleDevelopmentRegion: zh-Hans
+        CFBundleDisplayName: AI小说
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        # 麦克风隐私声明：语音输入 AI 问答需要；缺失时一请求录音权限系统直接 abort 杀进程
+        NSMicrophoneUsageDescription: 语音提问需要麦克风录音，你的声音仅用于转写后提交，不存储原始音频。
+        # 站点根地址：真机测试指向 Mac 局域网 IP（需与后端同一 Wi-Fi，ainovel 默认端口 3400、挂在 /novel 前缀）；
+        # TestFlight/生产包必须改为可公网访问的 HTTPS 域名。App 内「服务器设置」可覆盖此值。
+        AINovelBaseURL: http://192.168.1.55:3400/novel
+        # 本地真机测试允许 HTTP（服务器无 TLS 证书）；上架/生产构建前必须移除
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight

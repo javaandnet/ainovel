@@ -116,6 +116,19 @@
   <div class="tablewrap" style="margin-top:12px"><div id="bgBox"><div class="loading">加载中…</div></div></div>
 </div>
 
+<div class="section" id="tts">
+  <div class="grp-title">🎧 朗读音频缓存（体检 / 清理）</div>
+  <div class="tip">语音版每句 mp3 按 <code>sha1(文本|音色|语速)</code> 全站复用，落在 <code>data/tts/&lt;hash前2位&gt;/</code>。
+    <b>换音色不会覆盖旧音色的文件</b>（音色就在 hash 里），只会另存一份 —— 所以多音色 × 多语速会成倍占空间，
+    这里按同一口径看数并按音色清理。清理不可撤销：被删掉的句子下次朗读要重新向上游合成（整章会慢一轮）。</div>
+  <div id="ttsState" class="kv">加载中…</div>
+  <div class="btns" style="margin-top:10px"><button class="mbtn" id="ttsRefresh">🔍 重新体检</button></div>
+  <div class="grp-title" style="margin-top:16px">按音色汇总</div>
+  <div class="tablewrap"><div id="ttsVoiceBox"><div class="loading">加载中…</div></div></div>
+  <div class="grp-title" style="margin-top:16px">按音色 × 语速明细</div>
+  <div class="tablewrap"><div id="ttsBox"><div class="loading">加载中…</div></div></div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -157,10 +170,12 @@ async function boot() {
   $('#addUser').onclick = addUser;
   $('#gvGo').onclick = grantVip;
   bindBridge();
+  bindTts();
   loadUsers();
   loadVip();
   loadBridge();
-  const anchor = location.hash === '#vip' ? '#vip' : location.hash === '#bridge' ? '#bridge' : null;
+  loadTts();
+  const anchor = ['#vip', '#bridge', '#tts'].includes(location.hash) ? location.hash : null;
   if (anchor) { const el = $(anchor); if (el) el.scrollIntoView(); }
 }
 
@@ -382,6 +397,72 @@ async function removeBridgeKey(id, name) {
 async function setBridgeUrl(url) {
   try { await api('/admin/bridge/url', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) }); toast(url ? '✅ 地址已更新' : '已清除覆盖，回落 .env'); loadBridge(); }
   catch (e) { toast('❌ ' + e.message, true); }
+}
+
+// ── 朗读音频缓存：体检只读，清理先干跑拿到准确条数与占用再让人确认 ──
+const BYTES_MB = 1048576, BYTES_KB = 1024;
+function fmtBytes(n) {
+  const v = Number(n) || 0;
+  return v >= BYTES_MB ? (v / BYTES_MB).toFixed(1) + ' MB' : (v / BYTES_KB).toFixed(0) + ' KB';
+}
+function fmtDay(ts) { return ts ? new Date(Number(ts)).toLocaleDateString('zh-CN') : '—'; }
+
+function bindTts() { $('#ttsRefresh').onclick = loadTts; }
+
+async function loadTts() {
+  $('#ttsState').textContent = '加载中…';
+  try {
+    const r = await api('/admin/tts/audio');
+    if (!r || !r.ok) { $('#ttsState').textContent = (r && r.error) || '体检失败'; return; }
+    const s = r.settings || {}, t = r.totals || {};
+    $('#ttsState').innerHTML = `共 <b>${t.rows}</b> 条·库里 ${fmtBytes(t.bytes)}·磁盘 ${fmtBytes(t.diskBytes)}（${t.buckets} 个散列目录）`
+      + `<span class="sub">首尾静音裁剪：${s.trim ? `<span class="pill on">开</span> 裁完头留 ${s.headKeepMs}ms / 尾留 ${s.tailKeepMs}ms（已裁 ${t.trimmed} 条）` : '<span class="pill off">关</span>'}`
+      + `·静音探针 ffmpeg：${s.ffmpeg ? '<span class="pill on">可用</span>' : '<span class="pill off">未安装，不裁剪</span>'}·合成并发 ${s.concurrency}</span>`
+      + `<span class="sub">库与磁盘对账：有行无文件 ${t.missingFile} 条${t.missingFile ? '（下次访问自动清掉）' : ''}·有文件无行（孤儿）${t.orphans} 个${t.orphans ? '（占空间且永不命中）' : ''}</span>`;
+    renderTts(r);
+  } catch (e) {
+    $('#ttsState').textContent = '体检失败：' + e.message;
+    toast('朗读缓存体检失败：' + e.message, true);
+  }
+}
+
+function renderTts(r) {
+  const vrows = (r.voices || []).map((v) => `<tr>
+    <td class="u">${escapeHtml(v.voice)}</td>
+    <td>${v.n}</td><td>${fmtBytes(v.bytes)}</td>
+    <td>${v.trimmed === v.n ? '<span class="pill on">全部</span>' : `${v.trimmed}/${v.n}`}</td>
+    <td>${escapeHtml((v.rates || []).join(' '))}</td><td>${fmtDay(v.lastCreated)}</td>
+    <td><button data-pv="${escapeHtml(v.voice)}">🧹 清音库</button></td>
+  </tr>`).join('');
+  $('#ttsVoiceBox').innerHTML = `<table class="utable"><thead><tr><th>音色</th><th>条数</th><th>占用</th><th>已裁剪</th><th>语速档</th><th>最后新增</th><th>操作</th></tr></thead><tbody>${vrows || '<tr><td colspan="7">还没有缓存过音频</td></tr>'}</tbody></table>`;
+  const grows = (r.groups || []).map((g) => `<tr>
+    <td class="u">${escapeHtml(g.voice)}</td><td>${escapeHtml(g.rate)}</td>
+    <td>${g.n}</td><td>${fmtBytes(g.bytes)}</td>
+    <td>${g.trimmed === g.n ? '<span class="pill on">全部</span>' : `${g.trimmed}/${g.n}`}</td>
+    <td>${g.trimmed ? g.tailPad + 'ms' : '—'}</td><td>${fmtDay(g.lastAccess)}</td>
+    <td><button data-pr="${escapeHtml(g.voice)}" data-rt="${escapeHtml(g.rate)}">🧹 清这一档</button></td>
+  </tr>`).join('');
+  $('#ttsBox').innerHTML = `<table class="utable"><thead><tr><th>音色</th><th>语速</th><th>条数</th><th>占用</th><th>已裁剪</th><th>句间留白</th><th>最后使用</th><th>操作</th></tr></thead><tbody>${grows || '<tr><td colspan="8">还没有缓存过音频</td></tr>'}</tbody></table>`;
+  const box = document.querySelector('#tts');
+  box.querySelectorAll('button[data-pv]').forEach(b => b.onclick = () => pruneTts({ voice: b.dataset.pv }, `音色「${b.dataset.pv}」全部`));
+  box.querySelectorAll('button[data-pr]').forEach(b => b.onclick = () => pruneTts({ voice: b.dataset.pr, rate: b.dataset.rt }, `「${b.dataset.pr}」× ${b.dataset.rt}`));
+}
+
+async function pruneTts(opt, label) {
+  const send = (body) => api('/admin/tts/audio/prune', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  try {
+    // 先干跑：确认框里得是真实条数与真实字节，不能拿估计唬人
+    const dry = await send({ ...opt, apply: false });
+    if (!dry.ok) return toast(dry.error || '清理失败', true);
+    if (!dry.matched) return toast(`${label}：没有可清理的记录${dry.skippedBusy ? `（${dry.skippedBusy} 条正在合成，已跳过）` : ''}`);
+    const notes = [];
+    if (dry.missing) notes.push(`其中 ${dry.missing} 条的文件已不在，只清记录`);
+    if (dry.skippedBusy) notes.push(`另有 ${dry.skippedBusy} 条正在合成，本轮不动`);
+    if (!confirm(`将删除 ${label}：${dry.matched} 条 / ${fmtBytes(dry.bytes)}${notes.length ? '（' + notes.join('；') + '）' : ''}\n\n删除后这些句子下次朗读要重新向上游合成，不可撤销。确定继续？`)) return;
+    const r = await send({ ...opt, apply: true, confirm: 'OK' });
+    toast(`✅ 已清理 ${r.matched} 条，释放 ${fmtBytes(r.freedBytes || 0)}（删文件 ${r.removedFiles || 0} 个）`);
+    loadTts();
+  } catch (e) { toast('❌ ' + e.message, true); }
 }
 
 boot();

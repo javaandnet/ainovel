@@ -226,6 +226,8 @@ export async function buildReport({ absPath, novel, outRoot, title, compareToTok
       // 连带影响：本页正文一字未改，只因别处改动而变
       cascade: state === 'present' && !reasons.some(r => r.code === 'content'),
       removed: state === 'removed',
+      // 行头字数：新增取新版、删除取旧版、其余取新版（与 stats.charsNew 一致）
+      contentLength: nw ? String(nw.contentText || '').length : (old ? String(old.contentText || '').length : 0),
     });
   }
 

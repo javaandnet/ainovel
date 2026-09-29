@@ -25,7 +25,7 @@ import * as store from './auth/userStore.js';
 import { requireAuth, requireSuperadmin, currentUser, setSessionCookie, clearSessionCookie } from './auth/session.js';
 import { BASE_PATH, sitePath } from './base.js';
 import { generateQuiz, explainSentence, explainWord, vocabExplainStatus, askQuestion, answerFeedback, pickVocab } from './reader/aiService.js';
-import { synthesize as ttsSynthesize, computeHash as ttsComputeHash } from './reader/ttsStore.js';
+import { synthesize as ttsSynthesize, computeHash as ttsComputeHash, auditAudio as ttsAudit, pruneAudio as ttsPrune } from './reader/ttsStore.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -260,6 +260,74 @@ p{color:#95a5a6;font-size:14px;line-height:1.7;}
 </div></body></html>`;
 }
 
+/* ── 真实来源 IP ──
+ * 线上 nginx 在本机反代，req.ip 恒为回环地址：拿它当限流键等于全站读者共用一个桶，
+ * 一个人点「生成全章」就能把其他人挤成 429（2026-09-13 线上实测：单章 139 句，
+ * access.log 里 404 与 429 各数百条）。
+ * 只在 socket 对端确为回环（即确实经过本机反代）时才认 X-Real-IP / X-Forwarded-For；
+ * 3400 端口在防火墙上是对公网开放的，直连时这两个头可随意伪造，不予采信。
+ * 另：本机 nginx 写的是 `$remote_addr:$remote_port`，带端口，要先剥掉。 */
+const LOOPBACK_RE = /^(::1|127\.[0-9.]+)$/;
+const IPV4_RE = /^(\d{1,3}\.){3}\d{1,3}$/;
+function headerHost(raw) {
+  const s = String(Array.isArray(raw) ? raw[0] : (raw || '')).split(',')[0].trim();
+  if (!s) return '';
+  if (s.startsWith('[')) return s.slice(0, s.indexOf(']') + 1);          /* [ipv6]:port */
+  const m = s.match(/^(.*):\d+$/);                                        /* 只有尾部是端口才剥 */
+  return m ? m[1] : s;
+}
+function clientIp(req) {
+  const direct = String((req.socket && req.socket.remoteAddress) || '').replace(/^::ffff:/, '');
+  if (!LOOPBACK_RE.test(direct)) return direct || 'unknown';              /* 直连：socket 地址即权威 */
+  for (const h of [req.headers['x-real-ip'], req.headers['x-forwarded-for']]) {
+    const cand = headerHost(h);
+    if (cand && (IPV4_RE.test(cand) || cand.includes(':'))) return cand;
+  }
+  return direct || 'unknown';
+}
+
+/* 定窗限流：60s 一格，超出即 429（带 Retry-After 让前端退避而不是当失败计数）。
+ * 桶按真实 IP 分，Map 只增不减会在公网被撑爆，故顺手清掉已过期窗口。 */
+function rateLimit(map, limit) {
+  return (req, res, next) => {
+    const ip = clientIp(req);
+    const t = Date.now();
+    let e = map.get(ip);
+    if (!e || t - e[1] > 60000) { e = [0, t]; map.set(ip, e); }
+    e[0]++;
+    if (e[0] > limit) {
+      const wait = Math.max(1, Math.ceil((60000 - (t - e[1])) / 1000));
+      res.set('Retry-After', String(wait));
+      return res.status(429).json({ error: `请求过于频繁，请 ${wait}s 后再试`, retryAfter: wait });
+    }
+    if (map.size > 5000) { for (const [k, v] of map) { if (t - v[1] > 120000) map.delete(k); } }
+    next();
+  };
+}
+
+/* 章节 URL → 磁盘路径。
+ * 前端传的是 window.location.pathname，中文书名目录在 URL 里是**百分号编码**的
+ * （/novel/<uid>/%E5%85%94%E5%AD%90.../chapter_x.html），磁盘上的目录名却是解码后的中文。
+ * 不解码直接 path.join，线上每本中文书都会判成「章节文件不存在」，整章 404。
+ * 解码后仍须挡住穿越：任何一段都不许再含分隔符、空字节或 . / ..。 */
+const CHAPTER_URL_RE = /^\/novel\/(?:([^/]+)\/)?([^/]+)\/([^/]+\.html)$/;
+function decodeSeg(raw) {
+  let s;
+  try { s = decodeURIComponent(raw); } catch { return null; }             /* 残缺 % 序列 */
+  if (!s || s === '.' || s === '..' || s.includes('/') || s.includes('\\') || s.includes('\0')) return null;
+  return s;
+}
+function resolveChapterFile(chapterUrl) {
+  const m = String(chapterUrl).match(CHAPTER_URL_RE);
+  if (!m) return { ok: false, status: 400, error: '无效的 chapterUrl 格式' };
+  const segs = [m[1], m[2], m[3]].filter(Boolean).map(decodeSeg);
+  if (segs.some((s) => s === null)) return { ok: false, status: 400, error: 'chapterUrl 路径不合法' };
+  const p = path.join(OUT_ROOT, ...segs);
+  if (!p.startsWith(OUT_ROOT + path.sep)) return { ok: false, status: 400, error: '非法的章节路径' };
+  if (!fs.existsSync(p)) return { ok: false, status: 404, error: '章节文件不存在', detail: segs.join('/') };
+  return { ok: true, path: p };
+}
+
 export function registerRoutes(app) {
   // 净化（对登录/会话/账号管理/预览类端点放行：这些响应按设计回显用户名与预览标识；
   // 预览接口要回 token 与正文 diff，不能被判敏字串清洗掉）
@@ -283,16 +351,11 @@ export function registerRoutes(app) {
 
   // ── 阅读器 AI（公开：读者无账号；服务端持 key + 缓存 + 限并发 + 限流）──
   const readerRL = new Map(); // ip -> [count, windowStartMs]
-  function readerRateLimit(req, res, next) {
-    const ip = req.ip || (req.socket && req.socket.remoteAddress) || 'unknown';
-    const t = Date.now();
-    let e = readerRL.get(ip);
-    if (!e || t - e[1] > 60000) { e = [0, t]; readerRL.set(ip, e); }
-    e[0]++;
-    if (e[0] > 60) return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
-    next();
-  }
-  const readerErr = (res, e) => res.status(e && e.status === 503 ? 503 : 500).json({ error: (e && e.message) || 'AI 服务异常' });
+  const readerRateLimit = rateLimit(readerRL, 60);
+  /* TTS 全章生成是批量请求（一章 100~200 句，逐句一发），额度按整章 + 余量给：
+   * 200/min 在读者连点两次或边播边补时必然撞墙，撞墙后整批失败且无法自愈。 */
+  const ttsRL = new Map();
+  const ttsRateLimit = rateLimit(ttsRL, 600);
   app.post('/api/reader/quiz', readerRateLimit, async (req, res) => {
     /* force 显式白名单取值（不摊平 req.body）：只有读者点「换一组新题」才为 true */
     try { res.json({ ok: true, questions: await generateQuiz(req.body?.document, Number(req.body?.age) || 9, { force: req.body?.force === true }) }); }
@@ -364,10 +427,14 @@ export function registerRoutes(app) {
     } catch (e) { readerErr(res, e); }
   });
 
-  /* ── TTS 音色白名单（正文朗读 + 讲解音频共用）── */
+  /* ── TTS 音色白名单（正文朗读 + 讲解音频共用）──
+   * 名单里的 ID 必须是微软边缘接口真实存在的音色：原先写的 zh-TW-YunHsiaoNeural
+   * 并不存在，选中繁中音色的读者会整章 503（接口报 "Stream closed … no turn.end"，
+   * 与限流长得一模一样，极易误判）。繁中改用实测可用的 HsiaoChen / YunJhe。 */
   const ALLOWED_VOICES = new Set([
-    // 中文
-    'zh-CN-YunxiNeural', 'zh-CN-XiaoxiaoNeural', 'zh-CN-YunjianNeural', 'zh-TW-YunHsiaoNeural',
+    // 中文（简中 / 繁中）
+    'zh-CN-YunxiNeural', 'zh-CN-XiaoxiaoNeural', 'zh-CN-YunjianNeural',
+    'zh-TW-HsiaoChenNeural', 'zh-TW-YunJheNeural',
     // 英文（讲解用）
     'en-US-JennyNeural', 'en-US-AriaNeural', 'en-US-AndrewNeural',
     // 日文（讲解用）
@@ -375,8 +442,19 @@ export function registerRoutes(app) {
   ]);
   const ALLOWED_RATES = new Set(['-20%', '+0%', '+30%', '+50%']);
 
+  /* TTS 合成结果 → 对外音频 URL：路径必须带 BASE_PATH。线上同域名下根级 /tts-audio/* 会被
+   * nginx 分给 aiinterview，它回 200 text/html（实测 454B）而不是 mp3，<audio> 拿到 HTML 必挂。
+   * 合成失败则把具体原因回给前端并记日志：全章生成是逐句批量，只回「合成失败」无法定位。 */
+  const TTS_DIR = path.join(ROOT, 'data', 'tts');
+  const ttsAudioUrl = (absPath) => sitePath('tts-audio', path.relative(TTS_DIR, absPath).split(path.sep).join('/'));
+  const ttsFail = (res, stage, info) => {
+    const detail = String((info && (info.error || info.message)) || '未报错').slice(0, 200);
+    console.warn(`[tts] ${stage}合成失败：${detail}`);
+    return res.status(503).json({ error: `合成失败：${detail}`, fallback: 'browser' });
+  };
+
   /* TTS 音频合成：句子级 mp3，带存在性校验防滥用 */
-  app.post('/api/tts/sentence', readerRateLimit, async (req, res) => {
+  app.post('/api/tts/sentence', ttsRateLimit, async (req, res) => {
     try {
       const { chapterUrl, text, voice, rate } = req.body || {};
       if (!chapterUrl || !text || !voice || !rate) {
@@ -388,47 +466,29 @@ export function registerRoutes(app) {
       if (!ALLOWED_RATES.has(rate)) {
         return res.status(400).json({ error: `不支持的语速：${rate}` });
       }
-      // 存在性校验：从章节 URL 提取文件路径，读取正文，确认句子存在
-      // chapterUrl 形如 "/novel/<uid>/<novelDir>/<chapterFile>.html" 或 "/novel/<novelDir>/<chapterFile>.html"
-      const urlMatch = chapterUrl.match(/^\/novel\/(?:([^/]+)\/)?([^/]+)\/([^/]+\.html)$/);
-      if (!urlMatch) {
-        return res.status(400).json({ error: '无效的 chapterUrl 格式' });
+      /* 存在性校验：URL 各段先百分号解码再拼路径（中文书名目录在 URL 里是编码态） */
+      const chapter = resolveChapterFile(chapterUrl);
+      if (!chapter.ok) {
+        if (chapter.detail) console.warn(`[tts] 章节定位失败（${chapter.status}）：${chapter.detail}`);
+        return res.status(chapter.status).json({ error: chapter.error });
       }
-      const [, uid, novelDir, chapterFile] = urlMatch;
-      const chapterPath = path.join(OUT_ROOT, uid || '', novelDir, chapterFile);
-      // 防路径穿越
-      if (!chapterPath.startsWith(OUT_ROOT)) {
-        return res.status(400).json({ error: '非法的章节路径' });
-      }
-      if (!fs.existsSync(chapterPath)) {
-        return res.status(404).json({ error: '章节文件不存在' });
-      }
-      const html = fs.readFileSync(chapterPath, 'utf8');
-      // 提取 <div class="content">...</div> 内的文本
+      const html = fs.readFileSync(chapter.path, 'utf8');
+      // 存在性校验：确认章节有正文内容即可（不再逐句比对，避免前后端文本 normalize 口径差异导致误拒）
       const contentMatch = html.match(/<div class="content">([\s\S]*?)<\/div>/);
       if (!contentMatch) {
         return res.status(400).json({ error: '章节无正文内容' });
       }
-      const chapterText = contentMatch[1].replace(/<[^>]+>/g, '').replace(/\s+/g, '');
-      if (!chapterText.includes(text.replace(/\s+/g, ''))) {
-        return res.status(400).json({ error: '句子不在章节正文中（存在性校验失败）' });
-      }
       // 合成
       const result = await ttsSynthesize(text, voice, rate);
-      if (!result) {
-        return res.status(503).json({ error: '合成失败，请回退到浏览器 TTS', fallback: 'browser' });
-      }
-      // 返回音频文件的相对路径（相对于 data/tts/）和 hash
-      const hash = ttsComputeHash(text, voice, rate);
-      const relPath = path.relative(path.join(ROOT, 'data', 'tts'), result.filePath);
-      res.json({ ok: true, hash, audioPath: `/tts-audio/${relPath}`, bytes: result.bytes });
+      if (!result || !result.ok) return ttsFail(res, '句子', result);
+      res.json({ ok: true, hash: result.hash, audioPath: ttsAudioUrl(result.filePath), bytes: result.bytes, tailPadMs: result.tailPadMs ?? null });
     } catch (e) {
       readerErr(res, e);
     }
   });
 
   /* TTS 音频合成：讲解文字 / AI 问答结果（无章节存在性校验，有长度限制） */
-  app.post('/api/tts/explain', readerRateLimit, async (req, res) => {
+  app.post('/api/tts/explain', ttsRateLimit, async (req, res) => {
     try {
       const { text, voice, rate } = req.body || {};
       if (!text || !voice || !rate) {
@@ -445,12 +505,8 @@ export function registerRoutes(app) {
         return res.status(400).json({ error: `文本过长（${text.length} 字，上限 2000）` });
       }
       const result = await ttsSynthesize(text, voice, rate);
-      if (!result) {
-        return res.status(503).json({ error: '合成失败，请回退到浏览器 TTS', fallback: 'browser' });
-      }
-      const hash = ttsComputeHash(text, voice, rate);
-      const relPath = path.relative(path.join(ROOT, 'data', 'tts'), result.filePath);
-      res.json({ ok: true, hash, audioPath: `/tts-audio/${relPath}`, bytes: result.bytes });
+      if (!result || !result.ok) return ttsFail(res, '讲解', result);
+      res.json({ ok: true, hash: result.hash, audioPath: ttsAudioUrl(result.filePath), bytes: result.bytes, tailPadMs: result.tailPadMs ?? null });
     } catch (e) {
       readerErr(res, e);
     }
@@ -1237,6 +1293,34 @@ export function registerRoutes(app) {
   /* 桥接服务本身可达吗（GET /api/health：不带密钥、不消耗 token）*/
   app.post('/api/admin/bridge/ping', requireSuperadmin, async (_req, res) => {
     res.json(await llm.checkReachable());
+  });
+
+  // ── 朗读音频缓存体检 / 清理（超管）──
+  /* 体检只读；清理会真删 data/tts 下的文件，所以三道门：超管登录 + 默认干跑 +
+     真删（apply）时沿用删章节那道 confirm:"OK" 口径，与管理页其它删除一致。 */
+  app.get('/api/admin/tts/audio', requireSuperadmin, async (_req, res) => {
+    try { res.json(await ttsAudit()); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+  });
+  app.post('/api/admin/tts/audio/prune', requireSuperadmin, async (req, res) => {
+    const apply = req.body?.apply === true;
+    if (apply) {
+      const denied = requireOkConfirm(req.body, '朗读音频缓存');
+      if (denied) return res.status(400).json({ error: denied });
+    }
+    try {
+      const r = await ttsPrune({ voice: req.body?.voice, rate: req.body?.rate, all: req.body?.all === true, apply });
+      if (!r.ok) return res.status(400).json({ error: r.error });
+      res.json(r);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── /admin/:id → 返回管理页 index.html（SPA 风格，前端从路径读小说 ID 自动选中）──
+  // 挂在 express.static 之前（server.js 先 registerRoutes 再挂静态），所以能截下非文件的 /admin/<uuid>
+  // 带 . 的 id（preview.html / dashboard.html）是真实文件，next() 交给后面的 express.static 处理
+  app.get('/admin/:id', (req, res, next) => {
+    if (req.params.id.includes('.')) return next();
+    res.sendFile(path.join(__dirname, '..', 'public', 'admin', 'index.html'));
   });
 }
 

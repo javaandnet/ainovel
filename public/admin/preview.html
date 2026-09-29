@@ -118,7 +118,7 @@ function showResult(msg, cls) {
 }
 function fmtTs(ts) { return ts ? new Date(Number(ts)).toLocaleString('zh-CN', { hour12: false }) : ''; }
 
-$('#backLink').href = BASE + '/admin/';
+$('#backLink').href = BASE + '/admin/' + (NOVEL ? NOVEL : '');
 
 // ── 报告渲染 ──
 const STATE_TXT = { added: '新增', modified: '正文改动', removed: '待下线', present: '有变化', unchanged: '未变' };
@@ -180,10 +180,13 @@ function renderRows(r, token) {
     const label = it.label && it.label !== it.filename ? it.label : (it.filename === 'index.html' ? '目录页' : it.filename);
     const arrow = (it.oldLabel && it.newLabel && it.oldLabel !== it.newLabel)
       ? `<div class="stat">${escapeHtml(it.oldLabel)} → ${escapeHtml(it.newLabel)}</div>` : '';
+    const wc = it.contentLength != null ? it.contentLength : (it.stats ? (it.stats.charsNew != null ? it.stats.charsNew : it.stats.charsOld) : null);
+    const wcTxt = wc != null && wc > 0 ? `${wc} 字` : '';
     return `<div class="row${same ? ' hide same-row' : ''}" data-file="${escapeHtml(it.filename)}" data-token="${escapeHtml(token || '')}">
       <div class="rowhead">
         <span class="badge ${st.cls}">${escapeHtml(st.txt)}</span>
         <div class="t">${escapeHtml(label)}</div>
+        ${wcTxt ? `<span class="f">${escapeHtml(wcTxt)}</span>` : ''}
         <span class="f">${escapeHtml(it.filename)}</span>
       </div>
       <div class="rowbody">

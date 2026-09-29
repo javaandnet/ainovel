@@ -1,0 +1,6 @@
+# 生成物：.xcodeproj 由 XcodeGen 从 project.yml 产生，不入库
+*.xcodeproj
+build/
+DerivedData/
+xcuserdata/
+.DS_Store

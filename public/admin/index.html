@@ -131,6 +131,7 @@
   </div>
   <div class="novel-row">
     <select class="novel-select" id="novelSel"><option value="">— 选择小说 —</option></select>
+    <button class="newbtn" id="refreshBtn" title="刷新小说列表与当前章节" style="background:#2c3e50">↻</button>
     <button class="newbtn" id="newNovelBtn">＋ 新建</button>
     <button class="llmchip" id="llmChip" title="点击重新检测">⋯ AI 链路</button>
   </div>
@@ -268,6 +269,35 @@ const $ = (s) => document.querySelector(s);
 const enc = encodeURIComponent;
 /* 站点前缀：本页固定在 <BASE>/admin/ 下，据此反推；接口与跳转都按前缀发出 */
 const BASE = location.pathname.replace(/\/admin(\/.*)?$/, '');
+/* 从 URL 路径读小说 ID（/admin/:id → 自动选中） */
+const urlNovelId = (location.pathname.match(/\/admin\/([^/]+)$/) || [])[1] || '';
+let urlNovelApplied = false;
+// 格式化大纲文本：如果内容是 LLM 返回的原始 JSON（如 {"chapters":[...],"word_count_estimate":...}），
+// 提取其中的大纲正文并格式化为可读纯文本；已经是纯文本则原样返回。
+function formatOutlineText(raw) {
+  const text = String(raw || '').trim();
+  if (!text || text[0] !== '{') return text;
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) return text;
+  let obj;
+  try { obj = JSON.parse(m[0]); } catch { return text; }
+  if (Array.isArray(obj?.chapters) && obj.chapters.length > 0) {
+    const parts = obj.chapters
+      .filter(c => c && String(c.outline || '').trim())
+      .map(c => {
+        const n = String(c.name || '').trim();
+        const o = String(c.outline || '').trim();
+        return n ? `${n}\n${o}` : o;
+      });
+    if (parts.length) return parts.join('\n\n');
+  }
+  if (obj?.outline && typeof obj.outline === 'string' && obj.outline.trim()) {
+    const n = String(obj.name || '').trim();
+    const o = obj.outline.trim();
+    return n ? `${n}\n${o}` : o;
+  }
+  return text;
+}
 // ── 长任务反馈：遮罩 + 计时 + 服务端逐章进度，全部挂在公共入口 api() 上。
 // 为何不在各调用点分别加：这里有十几处 fetch，逐个加锁迟早漏一处，而漏一处就是一次重复提交。
 // 遮罩延后 600ms 才出现，所以快请求完全无感，只有真慢的任务才会看到。
@@ -414,10 +444,20 @@ function renderNovels(novels) {
   const prev = sel.value;
   sel.innerHTML = '<option value="">— 选择小说 —</option>' +
     novels.map(n => `<option value="${n.id}">${n.name || '未命名'}（${n.chapterCount || 0}章）</option>`).join('');
+  // 首次加载时优先选 URL 路径里的小说 ID（直接跳转 /admin/:id 的场景）
+  if (!urlNovelApplied && urlNovelId) {
+    urlNovelApplied = true;
+    if (novels.some(n => n.id === urlNovelId)) { sel.value = urlNovelId; currentNovel = urlNovelId; onNovelChange(); return; }
+  }
   if (prev && novels.some(n => n.id === prev)) sel.value = prev;
   else { sel.value = ''; currentNovel = ''; onNovelChange(); }
 }
-$('#novelSel').addEventListener('change', () => { currentNovel = $('#novelSel').value; onNovelChange(); });
+$('#novelSel').addEventListener('change', () => {
+  currentNovel = $('#novelSel').value;
+  // 切换小说时同步更新 URL，方便下次直接跳转
+  history.replaceState(null, '', currentNovel ? BASE + '/admin/' + currentNovel : BASE + '/admin/');
+  onNovelChange();
+});
 
 async function onNovelChange() {
   const id = currentNovel;
@@ -425,6 +465,14 @@ async function onNovelChange() {
   $('#flowHint').style.display = 'none'; $('#flowBody').style.display = '';
   await Promise.all([loadSettings(), loadChapters()]);
 }
+
+// ── 刷新：重新加载小说列表 + 当前小说章节 ──
+$('#refreshBtn').onclick = async () => {
+  const prev = currentNovel;
+  await reloadNovels();
+  if (prev) { $('#novelSel').value = prev; currentNovel = prev; }
+  await onNovelChange();
+};
 
 // ── 新建小说 ──
 $('#newNovelBtn').onclick = () => {
@@ -444,7 +492,9 @@ $('#newNovelBtn').onclick = () => {
       const r = await api('/novels', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, outline: $('#cOutline').value, content: $('#cContent').value }) });
       showResult(`✅ 已创建《${r.novel.name || title}》`, 'ok');
       await reloadNovels();
-      currentNovel = r.novel.id; $('#novelSel').value = currentNovel; onNovelChange();
+      currentNovel = r.novel.id; $('#novelSel').value = currentNovel;
+      history.replaceState(null, '', BASE + '/admin/' + currentNovel);
+      onNovelChange();
     } catch (e) { showResult('❌ ' + e.message, 'err'); }
   };
 };
@@ -499,7 +549,9 @@ $('#delNovel').onclick = async () => {
   showLoading('删除中…');
   try {
     await api(`/novels/${enc(id)}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm: 'OK' }) });
-    showResult('🗑️ 已删除该小说', 'ok'); currentNovel = ''; await reloadNovels(); onNovelChange();
+    showResult('🗑️ 已删除该小说', 'ok'); currentNovel = '';
+    history.replaceState(null, '', BASE + '/admin/');
+    await reloadNovels(); onNovelChange();
   } catch (e) { showResult('❌ ' + e.message, 'err'); }
 };
 
@@ -830,7 +882,7 @@ async function openChapter(no, dir) {
   // 背后的列表跟着翻到本章所在页：否则看着第 60 章翻了半天，关掉弹层还停在第 1 页
   if (idx >= 0) { page = Math.floor(idx / PER); renderChapters(); }
   const s = $('#sheet');
-  CH = { no, bodyWords: Number(c.wordCount) || 0, base: { name: c.name || '', outline: c.outline || '' }, undo: null, suggest: '', savedAt: '' };
+  CH = { no, bodyWords: Number(c.wordCount) || 0, base: { name: c.name || '', outline: formatOutlineText(c.outline || '') }, undo: null, suggest: '', savedAt: '' };
   s.innerHTML = `
     <div class="ch-nav">
       <button id="chPrev" ${prev ? '' : 'disabled'}>‹ ${prev ? chPeerLabel(prev) : '上一章'}</button>
@@ -889,7 +941,7 @@ async function openChapter(no, dir) {
         body: JSON.stringify({ material: String($('#chIdea').value || '').trim() }),
       });
       if ($('#chOutline') !== box) return;   // 等的时候翻了章，别把草稿灌进下一章的框
-      box.value = r.outline;
+      box.value = formatOutlineText(r.outline);
       CH.undo = before; CH.suggest = r.name || ''; CH.savedAt = '';
       chPaintNote(); chPaintWords();
     } catch (e) {
@@ -1485,7 +1537,8 @@ function closeModal() {
   CH_NAV = null;   // 弹层一关，← / → 就该还给页面滚动
   $('#sheet').classList.remove('ch-in-next', 'ch-in-prev');
 }
-$('#mask').addEventListener('click', e => { if (e.target === $('#mask')) closeModal(); });
+// 禁用点击背景自动关闭：章节编辑弹层内容较多，误触背景会丢失未保存的改动
+// $('#mask').addEventListener('click', e => { if (e.target === $('#mask')) closeModal(); });
 
 function showLoading(t) { $('#resultArea').innerHTML = `<div class="grp-title">结果</div><div class="result"><div class="loading">${t}</div></div>`; }
 function showResult(t, cls) { $('#resultArea').innerHTML = `<div class="grp-title">结果</div><div class="result ${cls || ''}">${escapeHtml(t)}</div>`; }

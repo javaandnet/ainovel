@@ -98,6 +98,11 @@
       '  <div class="tts-row tts-engine-row">',
       '    <button class="tts-btn engine-btn" id="ttsEngine" title="切换朗读引擎：网页版（浏览器 TTS）或语音版（服务端合成 mp3）">🌐 网页版</button>',
       '    <button class="tts-btn gen-btn" id="ttsGenChapter" title="预生成全章音频（语音版专用，生成后可离线播放）">📥 生成全章</button>',
+      '    <select id="ttsGap" class="tts-rate-select" title="句间停顿（语音版）：服务端已裁掉音频自带的首尾静音，这里选的是两句之间额外留多少">',
+      '      <option value="0">⚡ 紧贴</option>',
+      '      <option value="250" selected> 自然</option>',
+      '      <option value="600">🌿 舒缓</option>',
+      '    </select>',
       '    <span class="tts-engine-hint" id="ttsEngineHint">浏览器 TTS，息屏可能无声</span>',
       '  </div>',
       '  <div class="tts-row"><span class="tts-hint" id="ttsHint" style="display:none"></span></div>',
@@ -194,6 +199,7 @@
     var autoEl = pick('ttsAuto');
     var screenBtn = pick('ttsScreen');
     var sleepSel = pick('ttsSleep');
+    var gapEl = pick('ttsGap');
     var sleepLeftEl = pick('ttsSleepLeft');
     var hintEl = pick('ttsHint');
     var chapterPanel = pick('chapterPanel');
@@ -332,6 +338,10 @@
     var ttsEngine = 'browser'; /* 'browser' | 'audio' */
     var audioEl = null;        /* 语音版 <audio> 元素 */
     var currentAudioUrl = null; /* 当前播放的音频 URL（用于 Media Session） */
+    var audioSeq = 0;        /* 当前 <audio> 里这段音频归属哪一次朗读：监听器只挂一次，
+                                不能用某次调用的 mySeq（闭包会冻在首句），必须读这个可变值 */
+    var curTailPad = null;   /* 这条音频尾部实际残留的静音毫秒数（服务端裁剪时量出，随接口回传）；
+                                null = 没量到 ⇒ 绝不提前跨句，老实等 ended */
 
     /* 0.05s 静音 WAV：单独看不发声，但足以让系统认为「本页正在放音频」。
        Web Speech 不像 <audio> 那样会占住音频会话，iOS/Android 一息屏就把合成挂起，
@@ -447,7 +457,8 @@
       clearSleep();
       sleepSel.value = '0';
       if (!playing) { return; }
-      synth.cancel();
+      if (ttsEngine === 'audio') { haltAudio(); } else { synth.cancel(); }
+      cancelPrefetch();
       seq++; /* 作废旧 utterance 的回调，否则 cancel 触发的 onend 会又跳下一句 */
       playing = false;
       paused = false;
@@ -529,6 +540,7 @@
     }
     function findNextUrl() { return findNavLink('下一章'); }
     function onChapterEnd() {
+      cancelPrefetch();
       playing = false;
       paused = false;
       releaseWakeLock();
@@ -598,7 +610,147 @@
       synth.speak(u);
     }
 
-    /* 语音版：从服务端合成 mp3 并播放 */
+    /* 语音版：从服务端合成 mp3 并播放
+     *
+     * 句间停顿的两处来源（2026-09-13 实测听感"两句之间明显断一下"）：
+     *   ① 播完当前句才发下一句的请求 —— 白等一次往返，没缓存的还要等上游合成；
+     *   ② 换 src 后 <audio> 要重新向服务端取 mp3 并缓冲才起声。
+     * 解法：开播本句的同时就预取下一句（prefetchNext），并把预取到的 mp3 拉成本地 blob，
+     * 跨句那一刻只是把 src 换成一个已经躺在本机的地址，等待压到几十毫秒，听感才连得上。
+     * 只留一格（下一句），任意时刻内存里最多两份 mp3；预取失败不影响正确性——轮到那句
+     * 时正常请求还会补一次。 */
+    var pre = null;         /* { idx, url } 下一句的本地 blob 地址 */
+    var preToken = 0;       /* 自增即作废在途的预取请求 */
+    var liveObjUrl = null;  /* 正在播的 blob，换源后回收，避免累积 */
+
+    function isObjUrl(u) { return typeof u === 'string' && u.indexOf('blob:') === 0; }
+    function dropObjUrl(u) { if (isObjUrl(u)) { try { URL.revokeObjectURL(u); } catch (e) {} } }
+    function cancelPrefetch() {
+      preToken++;
+      if (pre) { dropObjUrl(pre.url); pre = null; }
+    }
+    /* 彻底停声：网页版归 synth 管，语音版归 <audio> 管 —— 早先所有停止路径都只调
+       synth.cancel()，语音版按了暂停照样出声，只是到句末不再跨句，听起来像卡死。 */
+    function haltAudio() {
+      if (!audioEl) { return; }
+      try {
+        audioEl.pause();
+        /* 清源要用 removeAttribute + load：直接赋 '' 会被 Chrome 当成一次失败的加载，
+           稍后抛条 media error（控制台红一句「媒体无法加载」，看着像新故障）。 */
+        audioEl.removeAttribute('src');
+        audioEl.load();
+      } catch (e) {}
+      dropObjUrl(liveObjUrl);
+      liveObjUrl = null;
+      currentAudioUrl = null;
+      curTailPad = null;
+    }
+    /* 句间留白（面板「句间停顿」下拉，仅语音版）：服务端裁完仍会刻意留 120ms 尾静音
+       当安全余量，读者选的停顿是在这个基数上再加的。 */
+    function sentenceGapMs() {
+      var v = parseInt(gapEl.value, 10);
+      return isNaN(v) ? 250 : v;
+    }
+    /* 跨句判据只认播放位置，不认定时器：后台节流会把 setTimeout 拖后（位置才是准的），
+       而切早了会吃掉最后一个字 —— 那比多停一下严重得多。timeupdate 大约每 250ms 一次，
+       最坏比目标点多等 250ms，相对原先 0.84s 的句界静音可以忽略。
+       curTailPad 为 null（未裁剪/老缓存/纯文件兜底）时直接放过，由 ended 兜底跨句。 */
+    function maybeAdvance() {
+      if (!audioEl || ttsEngine !== 'audio' || !playing || paused || audioSeq !== seq) { return; }
+      if (curTailPad == null) { return; }
+      var dMs = audioEl.duration * 1000;
+      if (!isFinite(dMs) || dMs <= 0) { return; }
+      var target = dMs - curTailPad + sentenceGapMs();
+      /* 不给容差：容差等价于「允许比目标点早切多少」，而早切就是吃最后一个字。
+         差一毫秒也无所谓 —— timeupdate 会连续再来，条件取的是 >=。 */
+      if (audioEl.currentTime * 1000 < target) { return; }
+      speakSentence(currentIndex + 1);
+    }
+    /* <audio> 只建一次，监听器也只挂一次 ⇒ 判断当前归属必须用可变的 audioSeq，
+       绝不能用某次调用的 mySeq（闭包会冻在首句，第二句播完再也不跨句）。 */
+    function ensureAudioEl() {
+      if (audioEl) { return; }
+      audioEl = new Audio();
+      audioEl.preload = 'auto';
+      audioEl.addEventListener('timeupdate', maybeAdvance);
+      audioEl.addEventListener('ended', function () {
+        if (!(playing && !paused && audioSeq === seq)) { return; }
+        /* 留白比残留尾静音短时，timeupdate 会在句末之前就跨过去，ended 根本不会来。
+           走到这里只有三种情况：没量到尾静音（老缓存未裁剪）→ 放完就跨；
+           提前量因后台节流没赶得上 → 立刻跨；
+           读者要的停顿比尾静音还长（自然/舒缓）→ 位置已到底，timeupdate 不可能再发，
+           必须在结束点之后把差额补起来，否则三档设上听不出区别。 */
+        var mySeq = audioSeq;
+        var dMs = audioEl.duration * 1000;
+        if (curTailPad == null || !isFinite(dMs) || dMs <= 0) { speakSentence(currentIndex + 1); return; }
+        var wait = dMs - curTailPad + sentenceGapMs() - audioEl.currentTime * 1000;
+        if (wait <= 0) { speakSentence(currentIndex + 1); return; }
+        setTimeout(function () {
+          /* 重新校归属：等待期间可能已暂停/跳转/跨章，mySeq 与 audioSeq 不符就必须闭嘴 */
+          if (playing && !paused && mySeq === audioSeq) { speakSentence(currentIndex + 1); }
+        }, wait);
+      });
+      audioEl.addEventListener('error', function () {
+        if (playing && audioSeq === seq) {
+          playing = false;
+          paused = false;
+          releaseWakeLock();
+          updatePlayBtn();
+          showHint('音频播放中断');
+        }
+      });
+    }
+    /* 与逐句请求同口径（音色/语速现取，别缓存成旧偏好） */
+    function sentenceArgs(idx) {
+      return {
+        chapterUrl: window.location.pathname,
+        text: sentences[idx].textContent,
+        voice: edgeVoice(),
+        rate: edgeRate()
+      };
+    }
+    function ttsSentence(body) {
+      return fetch(ttsUrl('/api/tts/sentence'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      }).then(function (r) { return r.json().catch(function () { return {}; }); });
+    }
+    /* src 可以是服务端相对地址（首次请求）或本地 blob（预取命中），换源即播 */
+    function playAudio(src, mySeq, tailPadMs) {
+      ensureAudioEl();
+      dropObjUrl(liveObjUrl);
+      liveObjUrl = isObjUrl(src) ? src : null;
+      currentAudioUrl = src;
+      /* 每换一次源都重新认领尾静音：漏了这一步，上一句的留白会被套到这一句上，
+         跨句时刻就跟着错了；老接口不回这个字段时必须是 null（不提前）而不是 0。 */
+      curTailPad = (typeof tailPadMs === 'number' && isFinite(tailPadMs) && tailPadMs >= 0) ? tailPadMs : null;
+      audioSeq = mySeq; /* 认领：这段音频播完该往哪句走 */
+      audioEl.src = src;
+      audioEl.play().catch(function () {
+        if (audioSeq === seq) { showHint('音频播放被浏览器拦截（需手势触发）'); }
+      });
+      setupMediaSession();
+    }
+    /* 备好 idx+1：先合成，再落成 blob。播放一句要好几秒，这点时间足够覆盖网络与合成。 */
+    function prefetchNext(idx) {
+      var j = idx + 1;
+      if (ttsEngine !== 'audio' || j >= sentences.length) { return; }
+      if (pre && pre.idx === j) { return; }
+      if (pre) { dropObjUrl(pre.url); pre = null; }
+      var token = ++preToken;
+      ttsSentence(sentenceArgs(j)).then(function (data) {
+        if (token !== preToken || !data || !data.ok || !data.audioPath) { return; }
+        return fetch(data.audioPath).then(function (a) { return a.ok ? a.blob() : null; })
+          .then(function (blob) {
+            if (token !== preToken || !blob) { return; }
+            /* 尾静音留白跟着音频一起存下来：轮到那句时才能当场就定跨句时机，
+               不用再等一次接口 */
+            pre = { idx: j, url: URL.createObjectURL(blob), tailPadMs: data.tailPadMs };
+          });
+      }).catch(function () { /* 预取失败静默：轮到那句时正常请求会补 */ });
+    }
+
     function speakSentenceAudio(idx) {
       if (idx < 0) { idx = 0; }
       if (idx >= sentences.length) { onChapterEnd(); return; }
@@ -611,53 +763,30 @@
       updateProgress();
       updatePlayBtn();
       var mySeq = seq;
-      var text = sentences[idx].textContent;
-      /* 音色映射：浏览器 voiceName -> Edge voice */
-      var voiceMap = {
-        'zh-CN-YunxiNeural': 'zh-CN-YunxiNeural',
-        'zh-CN-XiaoxiaoNeural': 'zh-CN-XiaoxiaoNeural',
-        'zh-CN-YunjianNeural': 'zh-CN-YunjianNeural',
-        'zh-TW-YunHsiaoNeural': 'zh-TW-YunHsiaoNeural'
-      };
-      var voiceName = voiceMap[voiceSel.value] || 'zh-CN-YunxiNeural';
-      var rateMap = { '0.7': '-20%', '1': '+30%', '1.5': '+50%' };
-      var rateStr = rateMap[rateEl.value] || '+30%';
-      var chapterUrl = window.location.pathname;
-      fetch('/novel/api/tts/sentence', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chapterUrl: chapterUrl, text: text, voice: voiceName, rate: rateStr })
-      }).then(function (r) { return r.json(); }).then(function (data) {
+      /* 预取命中：这一句的音频已经在本地，直接开播 —— 连续朗读的关键一步 */
+      if (pre && pre.idx === idx) {
+        var hit = pre;
+        pre = null;
+        spokenOnce = true;
+        playAudio(hit.url, mySeq, hit.tailPadMs);
+        prefetchNext(idx);
+        return;
+      }
+      /* 没命中说明是跳转/重播，目标句变了，在途预取作废（否则会留一份永远播不到的 blob） */
+      cancelPrefetch();
+      ttsSentence(sentenceArgs(idx)).then(function (data) {
         if (mySeq !== seq) { return; } /* 已切走，作废 */
-        if (!data.ok || !data.audioPath) {
-          /* 合成失败，自动回落到浏览器 TTS */
-          showHint('语音版合成失败，回落到网页版');
+        if (!data || !data.ok || !data.audioPath) {
+          /* 合成失败，自动回落到浏览器 TTS。原因必须显示：线上曾因章节路径判错
+             整章失败，界面只写「失败」两个字，谁都看不出是服务端的问题 */
+          showHint('语音版合成失败（' + ((data && data.error) || '未知原因') + '），回落到网页版');
           switchEngine('browser');
           speakSentence(idx);
           return;
         }
         spokenOnce = true;
-        if (!audioEl) {
-          audioEl = new Audio();
-          audioEl.addEventListener('ended', function () {
-            if (playing && !paused && mySeq === seq) { speakSentence(currentIndex + 1); }
-          });
-          audioEl.addEventListener('error', function () {
-            if (playing && mySeq === seq) {
-              playing = false;
-              paused = false;
-              releaseWakeLock();
-              updatePlayBtn();
-              showHint('音频播放中断');
-            }
-          });
-        }
-        currentAudioUrl = data.audioPath;
-        audioEl.src = currentAudioUrl;
-        audioEl.play().catch(function () {
-          if (mySeq === seq) { showHint('音频播放被浏览器拦截（需手势触发）'); }
-        });
-        setupMediaSession();
+        playAudio(data.audioPath, mySeq, data.tailPadMs);
+        prefetchNext(idx); /* 这句正在放，趁这几秒把下一句备好 */
       }).catch(function (err) {
         if (mySeq === seq) {
           showHint('语音版请求失败：' + err.message);
@@ -666,7 +795,6 @@
         }
       });
     }
-
     /* Media Session：锁屏/蓝牙耳机控件 */
     function setupMediaSession() {
       if (!('mediaSession' in navigator)) { return; }
@@ -704,8 +832,9 @@
     function switchEngine(engine) {
       if (engine === ttsEngine) { return; }
       /* 停止当前播放 */
+      cancelPrefetch();
       if (playing) {
-        if (ttsEngine === 'audio' && audioEl) { audioEl.pause(); audioEl.src = ''; }
+        if (ttsEngine === 'audio') { haltAudio(); }
         else { synth.cancel(); }
         playing = false;
         paused = false;
@@ -729,13 +858,21 @@
     playBtn.addEventListener('click', function () {
       if (playing) {
         if (paused) {
-          synth.resume();
           paused = false;
-          /* 少数浏览器 pause 后 utterance 已被丢弃，resume 无效 → 重读当前句，不丢进度 */
-          if (!synth.speaking && !synth.pending) { speakSentence(currentIndex); }
+          if (ttsEngine === 'audio') {
+            /* 音频版没有"续播半途"的概念可用（pause 后 play 从原位置继续，
+               但若这一句已经放完，重放会不再触发 ended）→ 直接重读当前句 */
+            if (!audioEl || audioEl.ended) { speakSentence(currentIndex); }
+            else { audioEl.play().catch(function () {}); }
+          } else {
+            synth.resume();
+            /* 少数浏览器 pause 后 utterance 已被丢弃，resume 无效 → 重读当前句，不丢进度 */
+            if (!synth.speaking && !synth.pending) { speakSentence(currentIndex); }
+          }
         } else {
-          synth.pause();
           paused = true;
+          if (ttsEngine === 'audio') { if (audioEl) { audioEl.pause(); } }
+          else { synth.pause(); }
         }
         updatePlayBtn();
       } else {
@@ -746,7 +883,8 @@
     restartBtn.addEventListener('click', function () {
       if (sentences.length === 0) { return; }
       if (!confirm('确定要从头开始朗读吗？')) { return; }
-      synth.cancel();
+      if (ttsEngine === 'audio') { haltAudio(); } else { synth.cancel(); }
+      cancelPrefetch();
       playing = false;
       paused = false;
       releaseWakeLock();
@@ -767,8 +905,9 @@
       var idx = Math.round((pct / 100) * (sentences.length - 1));
       if (idx < 0) { idx = 0; }
       if (idx >= sentences.length) { idx = sentences.length - 1; }
-      /* 拖动时暂停朗读，避免冲突 */
-      synth.cancel();
+      /* 拖动时暂停朗读，避免冲突（语音版必须停 <audio>，否则拖完还在出声） */
+      if (ttsEngine === 'audio') { haltAudio(); } else { synth.cancel(); }
+      cancelPrefetch();
       playing = false;
       paused = false;
       releaseWakeLock();
@@ -948,16 +1087,52 @@
     }
 
     /* ===== 5. 音色与偏好（localStorage 持久化） ===== */
+    /* 下拉里放的是浏览器本地音色名（macOS 的 Mei Jia / Ting-Ting、Chrome 的 Google 普通话…），
+       服务端白名单要的是 Edge 音色 ID。旧代码拿浏览器名去查一张以 Edge ID 为键的表，
+       永远查不中 → 不管选哪个音色都静默按 YunxiNeural 合成（选了繁体女声却出声简中男声）。
+       这里与 loadVoices 共用同一套匹配口径，保证「看到的」与「听到的」是同一个音色。 */
+    var VOICE_MATCHERS = [
+      { key: 'meijia', match: function (v) { return /mei[- ]?jia/i.test(v.name); } },
+      { key: 'tingting', match: function (v) { return /ting[- ]?ting/i.test(v.name); } },
+      { key: 'google_zh_CN', match: function (v) { return /google/i.test(v.name) && /zh[-_]?CN/i.test(v.lang); } },
+      { key: 'google_zh_TW', match: function (v) { return /google/i.test(v.name) && /zh[-_]?TW/i.test(v.lang); } }
+    ];
+    /* 音色 ID 必须与服务端 ALLOWED_VOICES 一致：选了个上游不存在的 ID，
+       整章每句都会 503，表现和限流一模一样。繁中用 HsiaoChen（女）/ YunJhe（男）。 */
+    var EDGE_VOICE = {
+      meijia: 'zh-TW-HsiaoChenNeural',       /* 繁中女声 */
+      tingting: 'zh-CN-XiaoxiaoNeural',      /* 简中女声 */
+      google_zh_CN: 'zh-CN-YunxiNeural',
+      google_zh_TW: 'zh-TW-HsiaoChenNeural'
+    };
+    var EDGE_VOICE_IDS = ['zh-CN-YunxiNeural', 'zh-CN-XiaoxiaoNeural', 'zh-CN-YunjianNeural', 'zh-TW-HsiaoChenNeural', 'zh-TW-YunJheNeural'];
+    function edgeVoice() {
+      var name = voiceSel.value || '';
+      if (EDGE_VOICE_IDS.indexOf(name) >= 0) { return name; }
+      var voices = synth.getVoices();
+      for (var i = 0; i < voices.length; i++) {
+        if (voices[i].name !== name) { continue; }
+        for (var w = 0; w < VOICE_MATCHERS.length; w++) {
+          if (VOICE_MATCHERS[w].match(voices[i])) { return EDGE_VOICE[VOICE_MATCHERS[w].key]; }
+        }
+        /* 没命中已知名字：按 locale 兜底，至少保证语种不错 */
+        if (/zh[-_]?TW|Hant/i.test(voices[i].lang)) { return 'zh-TW-HsiaoChenNeural'; }
+        if (/zh/i.test(voices[i].lang)) { return 'zh-CN-XiaoxiaoNeural'; }
+      }
+      return 'zh-CN-YunxiNeural';
+    }
+    function edgeRate() {
+      var map = { '0.7': '-20%', '1': '+30%', '1.5': '+50%' };
+      return map[rateEl.value] || '+30%';
+    }
+    /* TTS 接口与 AI 接口同一前缀口径：站点挂在 /novel 还是根路径都不必重新发布书页 */
+    function ttsUrl(path) { return (APP_BASE === null ? '/novel' : APP_BASE) + path; }
+
     function loadVoices() {
       var voices = synth.getVoices();
       if (!voices.length) { return; }
-      /* 只保留指定的四种语音：MeiJia、TingTing、Google 普通话、Google 台湾 */
-      var wanted = [
-        { key: 'meijia', match: function (v) { return /meijia/i.test(v.name); } },
-        { key: 'tingting', match: function (v) { return /tingting/i.test(v.name); } },
-        { key: 'google_zh_CN', match: function (v) { return /google/i.test(v.name) && /zh[-_]?CN/i.test(v.lang); } },
-        { key: 'google_zh_TW', match: function (v) { return /google/i.test(v.name) && /zh[-_]?TW/i.test(v.lang); } }
-      ];
+      /* 只保留指定的四种语音：MeiJia、TingTing、Google 普通话、Google 台湾（与 edgeVoice 同口径） */
+      var wanted = VOICE_MATCHERS;
       var list = [];
       for (var w = 0; w < wanted.length; w++) {
         for (var i = 0; i < voices.length; i++) {
@@ -987,9 +1162,17 @@
     try {
       var savedRate = localStorage.getItem('ttsRate');
       if (savedRate) { rateEl.value = savedRate; }
+      var savedGap = localStorage.getItem('ttsGap');
+      /* 只认存过的值：没存过就维持下拉里的「自然」默认（0 是合法选项，不能用真值判） */
+      if (savedGap !== null) { gapEl.value = savedGap; }
       if (localStorage.getItem('ttsAutoNext') === '1') { autoEl.classList.add('active'); }
     } catch (e3) {}
     rateEl.addEventListener('change', function () { try { localStorage.setItem('ttsRate', rateEl.value); } catch (e4) {} });
+    gapEl.addEventListener('change', function () {
+      try { localStorage.setItem('ttsGap', gapEl.value); } catch (eGap) {}
+      /* 改完当场见效：正在播的这句按新留白重新判一次位置（提前量落在尾静音里，不会切字） */
+      maybeAdvance();
+    });
     voiceSel.addEventListener('change', function () { try { localStorage.setItem('ttsVoiceName', voiceSel.value); } catch (e5) {} });
     autoEl.addEventListener('click', function () {
       autoEl.classList.toggle('active');
@@ -1033,47 +1216,86 @@
       switchEngine(ttsEngine === 'browser' ? 'audio' : 'browser');
     });
 
-    /* 生成全章音频（语音版专用） */
+    /* 生成全章音频（语音版专用）
+       并发收到 3、每发之间留间隔：整章上百句一次齐发，既容易被微软边缘接口限流，
+       也会撞本站限流；而撞限流本不该记成失败，所以按服务端 Retry-After 退避重试。
+       失败一定要带原因 —— 只报「0 成功，139 失败」等于把定位工作丢给读者。 */
     var genBtn = document.getElementById('ttsGenChapter');
     genBtn.addEventListener('click', function () {
       if (ttsEngine !== 'audio') {
         showHint('请先切换到语音版再生成全章音频');
         return;
       }
-      var voiceMap = { 'zh-CN-YunxiNeural': 'zh-CN-YunxiNeural', 'zh-CN-XiaoxiaoNeural': 'zh-CN-XiaoxiaoNeural', 'zh-CN-YunjianNeural': 'zh-CN-YunjianNeural', 'zh-TW-YunHsiaoNeural': 'zh-TW-YunHsiaoNeural' };
-      var voiceName = voiceMap[voiceSel.value] || 'zh-CN-YunxiNeural';
-      var rateMap = { '0.7': '-20%', '1': '+30%', '1.5': '+50%' };
-      var rateStr = rateMap[rateEl.value] || '+30%';
+      var voiceName = edgeVoice();
+      var rateStr = edgeRate();
       var chapterUrl = window.location.pathname;
       var total = sentences.length;
+      var CONC = 3;         /* 同时在飞的请求数 */
+      var GAP = 200;        /* 每发完成后到补下一发的间隔（ms） */
+      var MAX_RETRY = 2;    /* 限流 / 网络错的重试次数 */
       var done = 0;
       var failed = 0;
+      var nextIdx = 0;
+      var active = 0;
+      var firstErr = '';
       genBtn.disabled = true;
       genBtn.textContent = '⏳ 生成中...';
       showHint('开始生成全章音频（0/' + total + '）');
-      function genNext(idx) {
-        if (idx >= total) {
-          genBtn.disabled = false;
-          genBtn.textContent = '📥 生成全章';
-          showHint('全章音频生成完成：' + done + ' 成功，' + failed + ' 失败');
-          return;
-        }
-        var text = sentences[idx].textContent;
-        fetch('/novel/api/tts/sentence', {
+
+      /* 一次一句：非 2xx 与 {ok:false} 都抛成 Error，并把状态码与 Retry-After 带上 */
+      function postSentence(body) {
+        return fetch(ttsUrl('/api/tts/sentence'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chapterUrl: chapterUrl, text: text, voice: voiceName, rate: rateStr })
-        }).then(function (r) { return r.json(); }).then(function (data) {
-          if (data.ok) { done++; } else { failed++; }
-          showHint('生成中（' + (done + failed) + '/' + total + '）');
-          setTimeout(function () { genNext(idx + 1); }, 100); /* 间隔 100ms 避免压垮服务端 */
-        }).catch(function () {
-          failed++;
-          showHint('生成中（' + (done + failed) + '/' + total + '）');
-          setTimeout(function () { genNext(idx + 1); }, 100);
+          body: JSON.stringify(body)
+        }).then(function (r) {
+          return r.json().catch(function () { return {}; }).then(function (j) {
+            if (!r.ok || !j.ok || !j.audioPath) {
+              var e = new Error(j.error || ('HTTP ' + r.status));
+              e.status = r.status;
+              e.retryAfter = Number(j.retryAfter || r.headers.get('Retry-After')) || 0;
+              throw e;
+            }
+            return j;
+          });
         });
       }
-      genNext(0);
+      function genOne(idx, attempt) {
+        var body = { chapterUrl: chapterUrl, text: sentences[idx].textContent, voice: voiceName, rate: rateStr };
+        return postSentence(body).then(function () {
+          done++;
+        }, function (err) {
+          /* 429 听服务端的等待时间，503 与网络错短退避；参数/路径类 4xx 重试无意义 */
+          var retryable = !err.status || err.status === 429 || err.status === 503;
+          if (retryable && attempt < MAX_RETRY) {
+            return new Promise(function (resolve) {
+              setTimeout(resolve, (err.retryAfter || 3) * 1000 + attempt * 700);
+            }).then(function () { return genOne(idx, attempt + 1); });
+          }
+          failed++;
+          if (!firstErr) { firstErr = (err && err.message) || '未知错误'; }
+        });
+      }
+      function finish() {
+        genBtn.disabled = false;
+        genBtn.textContent = '📥 生成全章';
+        var msg = '全章音频生成完成：' + done + ' 成功，' + failed + ' 失败';
+        showHint(failed && firstErr ? msg + '（' + firstErr + '）' : msg);
+      }
+      function pump() {
+        if (nextIdx >= total) { if (!active) { finish(); } return; }
+        while (active < CONC && nextIdx < total) {
+          (function (idx) {
+            active++;
+            genOne(idx, 0).then(function () {
+              active--;
+              showHint('生成中（' + (done + failed) + '/' + total + '）');
+              setTimeout(pump, GAP);
+            });
+          })(nextIdx++);
+        }
+      }
+      pump();
     });
 
     /* 定时关闭：分钟档选中即重新计时，「本章结束」挂章节档，选「不定时」即取消 */
