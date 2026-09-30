@@ -31,6 +31,8 @@ targets:
       properties:
         CFBundleDevelopmentRegion: zh-Hans
         CFBundleDisplayName: AI小说
+        # TestFlight/App Store 上传跳过出口合规（加密）询问：仅标准 HTTP/HTTPS 传输，属豁免
+        ITSAppUsesNonExemptEncryption: false
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSRequiresIPhoneOS: true
