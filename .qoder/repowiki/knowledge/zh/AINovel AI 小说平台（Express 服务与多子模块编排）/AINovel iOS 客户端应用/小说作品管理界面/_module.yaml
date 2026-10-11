@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: ios_app/manage
+title: 小说作品管理界面
+scope:
+    - ios/AINovel/Manage/
+source_files: []
+depends_on: []
+related_to:
+    - path: services
+    - path: tools

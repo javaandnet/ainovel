@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: public_assets
+title: 前端静态资源与页面
+scope:
+    - public/
+source_files: []
+depends_on: []
+related_to:
+    - path: ios_app/reader
+    - path: ios_app/shared_infra

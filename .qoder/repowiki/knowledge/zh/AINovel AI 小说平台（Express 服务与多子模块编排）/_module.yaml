@@ -1,0 +1,14 @@
+schema_version: 1
+module_path: ""
+title: AINovel AI 小说平台（Express 服务与多子模块编排）
+scope:
+    - README.md
+    - .gitignore
+    - package.json
+    - package-lock.json
+    - server.js
+    - kill-port.sh
+    - .env.example
+source_files: []
+depends_on: []
+related_to: []

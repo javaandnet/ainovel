@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: ios_app
+title: AINovel iOS 客户端应用
+scope:
+    - ios/AINovel/
+source_files: []
+depends_on: []
+related_to: []

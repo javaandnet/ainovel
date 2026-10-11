@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: ios_app/app_shell
+title: iOS App Shell（入口、根视图与配置）
+scope:
+    - ios/AINovel/App/
+    - ios/AINovel/Assets.xcassets/
+    - ios/AINovel/Info.plist
+source_files: []
+depends_on: []
+related_to: []

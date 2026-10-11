@@ -1,0 +1,151 @@
+# 知识卡导出索引文件
+schema_version: 1
+locale: zh-CN
+branch: master
+nodes_managed: true
+exported_at: "2026-10-11T00:47:10Z"
+modules:
+    "":
+        dir_name: AINovel AI 小说平台（Express 服务与多子模块编排）
+        title: AINovel AI 小说平台（Express 服务与多子模块编排）
+        scope:
+            - README.md
+            - .gitignore
+            - package.json
+            - package-lock.json
+            - server.js
+            - kill-port.sh
+            - .env.example
+        source_files: []
+        children:
+            - ios_app
+            - public_assets
+            - reader
+            - services
+            - tools
+            - utils
+        depends_on: []
+        related_to: []
+    ios_app:
+        dir_name: AINovel iOS 客户端应用
+        title: AINovel iOS 客户端应用
+        scope:
+            - ios/AINovel/
+        source_files: []
+        children:
+            - ios_app/app_shell
+            - ios_app/auth
+            - ios_app/manage
+            - ios_app/reader
+            - ios_app/shared_infra
+        depends_on: []
+        related_to: []
+    ios_app/app_shell:
+        dir_name: iOS App Shell（入口、根视图与配置）
+        title: iOS App Shell（入口、根视图与配置）
+        scope:
+            - ios/AINovel/App/
+            - ios/AINovel/Assets.xcassets/
+            - ios/AINovel/Info.plist
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    ios_app/auth:
+        dir_name: iOS 端认证与会话管理
+        title: iOS 端认证与会话管理
+        scope:
+            - ios/AINovel/Auth/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    ios_app/manage:
+        dir_name: 小说作品管理界面
+        title: 小说作品管理界面
+        scope:
+            - ios/AINovel/Manage/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: services
+            - path: tools
+    ios_app/reader:
+        dir_name: 小说阅读与学习模块
+        title: 小说阅读与学习模块
+        scope:
+            - ios/AINovel/Reader/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: public_assets
+            - path: reader
+    ios_app/shared_infra:
+        dir_name: 网络、数据模型与安全存储基础设施
+        title: 网络、数据模型与安全存储基础设施
+        scope:
+            - ios/AINovel/Networking/
+            - ios/AINovel/Models/
+            - ios/AINovel/Security/
+            - ios/AINovel/Config/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: public_assets
+            - path: services
+    public_assets:
+        dir_name: 前端静态资源与页面
+        title: 前端静态资源与页面
+        scope:
+            - public/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: ios_app/reader
+            - path: ios_app/shared_infra
+    reader:
+        dir_name: 阅读器 AI 与音频处理服务
+        title: 阅读器 AI 与音频处理服务
+        scope:
+            - src/reader/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: ios_app/reader
+    services:
+        dir_name: 桥接密钥、预览发布与进度总线服务
+        title: 桥接密钥、预览发布与进度总线服务
+        scope:
+            - src/services/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: ios_app/manage
+            - path: ios_app/shared_infra
+            - path: tools
+    tools:
+        dir_name: 小说写作工具层（Writer Tool & Registry）
+        title: 小说写作工具层（Writer Tool & Registry）
+        scope:
+            - src/tools/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: ios_app/manage
+            - path: services
+    utils:
+        dir_name: 通用工具函数集（中文数字、路径解析、文本差异、字数目标）
+        title: 通用工具函数集（中文数字、路径解析、文本差异、字数目标）
+        scope:
+            - src/utils/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
