@@ -1,14 +1,28 @@
 import Foundation
 
-/// 全局运行配置。站点根地址优先取用户在「服务器设置」里配的地址（UserDefaults），
-/// 其次 Info.plist 的 `AINovelBaseURL`（TestFlight 包必须指向可公网访问的 HTTPS）。
+/// 全局运行配置。后端地址优先级：**用户选的接入环境 > 用户自设地址 > Info.plist / 编译默认**。
+/// - 局域网：Info.plist 的 `AINovelBaseURL`（真机开 Mac 开发服务）；
+/// - 公网：`https://ai.fsr.co.jp/novel`（nginx 把 `/novel/` 前缀原样转发到 3400）；
+/// - 自定义：设置页手填地址。
 ///
 /// 与 aistudy 不同：ainovel 鉴权走 httpOnly Cookie（Path=/novel），
-/// 因此 baseURL 必须是**带 /novel 前缀的站点根**，所有 API 请求拼在其后的 `api/...`，
-/// 否则 Cookie Path 不匹配、登录态不会被携带。
+/// 因此各档 baseURL 都必须是**带 /novel 前缀的站点根**，所有 API 请求拼在其后的 `api/...`，
+/// 否则 Cookie Path 不匹配、登录态不会被携带。换档/换地址会清除登录态（Cookie 属另一域）。
 enum AppConfig {
+    /// 接入环境档
+    enum ServerEnv: String, CaseIterable, Identifiable {
+        case builtin      // 局域网 / 内置
+        case cloud        // 公网服务器
+        case custom       // 手填
+        var id: String { rawValue }
+    }
+
     /// 用户自设服务器地址的 UserDefaults 键（服务器设置页写入）
     private static let serverOverrideKey = "ainovelServerBase"
+    private static let envKey = "ainovelServerEnv"
+
+    /// 公网服务器站点根（ainovel 挂在 /novel 前缀下，nginx 前缀原样透传）
+    static let cloudBaseURL = URL(string: "https://ai.fsr.co.jp/novel")!
 
     /// 默认地址：Info.plist → DEBUG 环境变量 → 回环（ainovel 默认端口 3400、挂在 /novel）
     static let defaultBaseURL: URL = {
@@ -25,8 +39,32 @@ enum AppConfig {
         return URL(string: "http://127.0.0.1:3400/novel")!
     }()
 
-    /// 当前生效地址：用户设置 > 默认。每次请求动态读取，改设置即时生效。
-    static var baseURL: URL { customServerURL ?? defaultBaseURL }
+    /// 当前生效档。旧版只存过自设地址、没有档概念 —— 那种情况按 custom 处理，避免升级后地址失效
+    static var env: ServerEnv {
+        get {
+            if let raw = UserDefaults.standard.string(forKey: envKey), let e = ServerEnv(rawValue: raw) { return e }
+            return UserDefaults.standard.string(forKey: serverOverrideKey) != nil ? .custom : .builtin
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: envKey) }
+    }
+
+    /// 当前生效地址：按档解析。每次请求动态读取，改设置即时生效。
+    static var baseURL: URL { url(for: env) }
+
+    /// 档对应地址；custom 档无有效自设地址时回落 builtin
+    static func url(for serverEnv: ServerEnv) -> URL {
+        switch serverEnv {
+        case .builtin: return defaultBaseURL
+        case .cloud: return cloudBaseURL
+        case .custom: return customServerURL ?? defaultBaseURL
+        }
+    }
+
+    /// 切档；非 custom 档顺手清掉自设地址，避免档与地址不一致
+    static func setEnv(_ serverEnv: ServerEnv) {
+        if serverEnv != .custom { UserDefaults.standard.removeObject(forKey: serverOverrideKey) }
+        env = serverEnv
+    }
 
     /// 用户自设地址（已规范化）；未设/非法返回 nil 回落默认
     static var customServerURL: URL? {
@@ -34,10 +72,15 @@ enum AppConfig {
         return normalize(s)
     }
 
-    /// 保存用户服务器地址；传空串恢复默认
+    /// 保存用户服务器地址并切到 custom 档；传空串恢复 builtin 档
     static func setCustomServer(_ raw: String) {
-        if normalize(raw) == nil { UserDefaults.standard.removeObject(forKey: serverOverrideKey); return }
-        UserDefaults.standard.set(raw.trimmingCharacters(in: .whitespacesAndNewlines), forKey: serverOverrideKey)
+        guard let url = normalize(raw) else {
+            UserDefaults.standard.removeObject(forKey: serverOverrideKey)
+            env = .builtin
+            return
+        }
+        UserDefaults.standard.set(url.absoluteString, forKey: serverOverrideKey)
+        env = .custom
     }
 
     /// 展示用的当前地址（去掉主机无路径时的默认 /novel 也一并显示，便于核对）
