@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: ios_app/auth
+title: iOS 客户端认证与会话管理
+scope:
+    - ios/AINovel/Auth/
+source_files: []
+depends_on: []
+related_to: []

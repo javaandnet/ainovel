@@ -6,8 +6,16 @@
 - [src/routes.js](file://src/routes.js)
 - [src/auth/session.js](file://src/auth/session.js)
 - [src/auth/userStore.js](file://src/auth/userStore.js)
+- [src/base.js](file://src/base.js)
+- [src/skills/novelPublisher/publish.js](file://src/skills/novelPublisher/publish.js)
 - [README.md](file://README.md)
 </cite>
+
+## 更新摘要
+**变更内容**   
+- 增强了 `/api/catalog` 端点实现，包含全面的目录扫描逻辑、VIP内容访问控制和结构化小说元数据
+- 更新了公开书单API的详细规格说明，包括章节计数和VIP状态指示器
+- 完善了VIP访问控制机制的文档说明
 
 ## 目录
 1. [简介](#简介)
@@ -27,7 +35,7 @@
 15. [架构总览](#架构总览)
 
 ## 简介
-本仓库是一个“阅读 + 管理 + 学习”一体化的 AI 小说平台。后端基于 Node.js 与 Express，对外暴露三类能力：
+本仓库是一个"阅读 + 管理 + 学习"一体化的 AI 小说平台。后端基于 Node.js 与 Express，对外暴露三类能力：
 - 认证与会话：用户登录、登出、当前用户信息。
 - 小说管理：小说 CRUD、章节增删改、大纲/正文生成、分部、字数治理、一致性检查、分享链接、VIP 属性。
 - 阅读器服务：公开可用的测试题、句子讲解、生词标注、单词讲解、问答、反馈、文生图；以及 TTS 朗读音频合成。
@@ -369,7 +377,7 @@ end
 - [src/routes.js:825-841](file://src/routes.js#L825-L841)
 
 ### POST /api/novels/:id/chapter/:no/outline-draft
-- 用途：根据全书概要与本章构思，调用 LLM 生成“仅草稿”的大纲建议，不写库。
+- 用途：根据全书概要与本章构思，调用 LLM 生成"仅草稿"的大纲建议，不写库。
 - 认证：需要登录，且必须是书主或超管。
 - 路径参数：
   - `id`：小说 ID。
@@ -820,7 +828,25 @@ end
 ### GET /api/catalog
 - 用途：公开书单，扫描各用户已发布站点，隐藏未授权 VIP 书。
 - 认证：无需登录；已登录时可显示本人作品站与已授权 VIP 书。
-- 成功响应：`{ novels: [...] }`
+- 功能特性：
+  - **全面目录扫描**：递归扫描 `public/novel/<uid>/` 目录结构，识别已发布的小说站点
+  - **VIP内容访问控制**：VIP书籍仅对书主本人或已获得授权的登录读者可见
+  - **结构化元数据**：返回包含章节计数、VIP状态、更新时间等完整信息的小说条目
+  - **智能排序**：按更新时间倒序排列，优先展示最新发布的小说
+- 成功响应：
+  - HTTP 200
+  - 主体：`{ novels: [{ id, uid, title, chapterCount, vip, url, updatedAt }] }`
+  
+  其中每个小说条目包含：
+  - `id`：小说唯一标识符（VIP书使用数据库ID，非VIP书使用路径标识）
+  - `uid`：用户ID（UUID格式）
+  - `title`：小说标题（经过目录名规范化处理）
+  - `chapterCount`：已发布章节数量（统计 `chapter_*.html` 文件数）
+  - `vip`：布尔值，标识是否为VIP专属内容
+  - `url`：完整的访问URL（包含BASE_PATH前缀）
+  - `updatedAt`：最后更新时间戳（毫秒）
+
+**更新** 此端点现已实现完整的目录扫描逻辑，能够准确统计章节数量并提供VIP状态指示器。
 
 **章节来源**
 - [src/routes.js:515-557](file://src/routes.js#L515-L557)
@@ -901,7 +927,7 @@ end
   - 登出后重新登录。
 - 小说管理：
   - 新建小说前先准备书名、概要与设定。
-  - 修改章节大纲建议使用“大纲草稿”接口，确认后再保存。
+  - 修改章节大纲建议使用"大纲草稿"接口，确认后再保存。
   - 删除整本或单章务必传 `confirm: "OK"`。
   - 发布前先用预览接口查看修改报告，确认无误再发布。
 - 阅读器与学习：

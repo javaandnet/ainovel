@@ -1,0 +1,14 @@
+schema_version: 1
+module_path: ""
+title: AINovel 平台单进程编排层
+scope:
+    - README.md
+    - .gitignore
+    - package.json
+    - package-lock.json
+    - server.js
+    - kill-port.sh
+    - .env.example
+source_files: []
+depends_on: []
+related_to: []
