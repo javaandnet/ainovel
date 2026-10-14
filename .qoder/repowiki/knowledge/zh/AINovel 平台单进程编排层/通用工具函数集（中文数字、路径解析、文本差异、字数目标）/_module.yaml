@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: utils
+title: 通用工具函数集（中文数字、路径解析、文本差异、字数目标）
+scope:
+    - src/utils/
+source_files: []
+depends_on: []
+related_to:
+    - path: tools

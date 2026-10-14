@@ -18,7 +18,7 @@ final class APIClient {
 
     /// 未登录态即可访问 / 或作为探测用的端点：这些路径的 401 不触发登出，直接透文案
     private static let publicPrefixes: [String] = [
-        "api/login", "api/logout", "api/me", "api/reader/", "api/tts/"
+        "api/login", "api/logout", "api/me", "api/catalog", "api/reader/", "api/tts/"
     ]
 
     private init() {

@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: ios_app/shared_infra
+title: AINovel iOS 共享基础设施（网络、模型、安全与配置）
+scope:
+    - ios/AINovel/Networking/
+    - ios/AINovel/Models/
+    - ios/AINovel/Security/
+    - ios/AINovel/Config/
+source_files: []
+depends_on: []
+related_to: []

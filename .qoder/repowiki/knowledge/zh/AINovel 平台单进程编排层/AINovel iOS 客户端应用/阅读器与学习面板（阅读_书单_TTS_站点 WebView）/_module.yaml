@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: ios_app/reader
+title: 阅读器与学习面板（阅读/书单/TTS/站点 WebView）
+scope:
+    - ios/AINovel/Reader/
+source_files: []
+depends_on: []
+related_to:
+    - path: reader
+    - path: services

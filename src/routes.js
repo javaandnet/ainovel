@@ -329,10 +329,10 @@ function resolveChapterFile(chapterUrl) {
 }
 
 export function registerRoutes(app) {
-  // 净化（对登录/会话/账号管理/预览类端点放行：这些响应按设计回显用户名与预览标识；
-  // 预览接口要回 token 与正文 diff，不能被判敏字串清洗掉）
+  // 净化（对登录/会话/账号管理/预览/公开书单类端点放行：这些响应按设计回显用户名、预览标识与公开书名；
+  // 预览接口要回 token 与正文 diff、公开书单要回原样书名，均不能被判敏字串清洗掉）
   app.use('/api', (req, res, next) => {
-    if (/^\/(login|logout|me|admin\/|reader\/|novels\/[^/]+\/preview)/.test(req.path)) return next();
+    if (/^\/(login|logout|me|catalog|admin\/|reader\/|novels\/[^/]+\/preview)/.test(req.path)) return next();
     const orig = res.json.bind(res);
     res.json = (body) => orig(scrubValue(body));
     next();
@@ -510,6 +510,50 @@ export function registerRoutes(app) {
     } catch (e) {
       readerErr(res, e);
     }
+  });
+
+  // ── 公开书单（读者无需登录）：扫描各用户已发布站点 ──
+  // 口径对齐 web 站首页（见上面 /novel 前置闸门②）：非 VIP 书公开可见；
+  // VIP 书只对书主本人或已被授权的登录读者出现，未授权/匿名一律整条隐藏（而不是给个锁标的）。
+  // 数据以磁盘已发布产物为准（<OUT_ROOT>/<uid>/<书名目录>/index.html），不查 global.db 的章节。
+  app.get('/api/catalog', (req, res) => {
+    const reader = currentUser(req);
+    const items = [];
+    let uids;
+    try { uids = fs.existsSync(OUT_ROOT) ? fs.readdirSync(OUT_ROOT) : []; } catch { uids = []; }
+    for (const uid of uids) {
+      if (!UUID_RE.test(uid)) continue;                 // 只认用户站；预览 token / 遗留文件跳过
+      const userOut = path.join(OUT_ROOT, uid);
+      let dirs; try { dirs = fs.readdirSync(userOut); } catch { continue; }
+      const vmap = vipMapForUid(uid);                    // dirName -> VIP novel 行（仅 VIP 书）
+      for (const dirName of dirs) {
+        const idx = path.join(userOut, dirName, 'index.html');
+        let stat; try { stat = fs.statSync(idx); } catch { continue; }   // 未发布成书页
+        if (!stat.isFile()) continue;
+        // 章数：已发布的 chapter_*.html（排除 index）
+        let chapterCount = 0;
+        try {
+          chapterCount = fs.readdirSync(path.join(userOut, dirName))
+            .filter((f) => /^chapter_.+\.html$/i.test(f)).length;
+        } catch { /* 目录不可读则计 0 */ }
+        const vipNovel = vmap[dirName] || null;          // 命中即 VIP 书
+        const isVip = !!vipNovel;
+        // VIP 门禁：与闸门②③同一判据（书主或有授权）；非 VIP 直接放行
+        const allowed = !isVip || (reader && (reader.id === vipNovel.user_id || store.hasVipAccess(reader.id, vipNovel.id)));
+        if (!allowed) continue;
+        items.push({
+          id: vipNovel ? vipNovel.id : `${uid}/${dirName}`,
+          uid,
+          title: dirName,
+          chapterCount,
+          vip: isVip,
+          url: sitePath(uid, dirName, 'index.html'),
+          updatedAt: stat.mtimeMs,
+        });
+      }
+    }
+    items.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    res.json({ novels: items });
   });
 
   // ── 以下 /api 全部需登录 ──

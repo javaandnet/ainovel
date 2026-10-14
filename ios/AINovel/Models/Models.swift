@@ -30,6 +30,22 @@ struct Novel: Codable, Identifiable {
 
 struct NovelsResponse: Decodable { let novels: [Novel]? }
 
+/// 公开书单条目（/api/catalog，无需登录）：指向已发布的读者站首页。
+/// url 为相对站点路径（/novel/<uid>/<书名>/index.html），交由 SiteWebView 拼 origin 后打开。
+struct CatalogNovel: Codable, Identifiable, Hashable {
+    let id: String
+    let uid: String?
+    let title: String?
+    let chapterCount: Int?
+    let vip: Bool?
+    let url: String?
+    let updatedAt: Double?
+
+    var display: String { title ?? "未命名" }
+    var chaptersDesc: String { "共 \(chapterCount ?? 0) 章" }
+}
+struct CatalogResponse: Decodable { let novels: [CatalogNovel]? }
+
 struct CreateNovelResponse: Codable {
     let ok: Bool?
     let novel: Novel?

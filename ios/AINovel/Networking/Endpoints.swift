@@ -8,6 +8,9 @@ enum Endpoint {
     static let logout = "api/logout"
     static let me = "api/me"
 
+    // 公开书单（未登录可浏览已发布作品，对齐 web 站首页）
+    static let catalog = "api/catalog"
+
     // 推理链路健康（登录后可用，另 /api/health 公开由桥接侧提供，这里用 llm-status）
     static let llmStatus = "api/llm-status"
     static let progress = "api/progress"

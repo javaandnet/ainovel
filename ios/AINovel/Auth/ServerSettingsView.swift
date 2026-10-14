@@ -10,6 +10,8 @@ struct ServerSettingsView: View {
     @State private var text = ""
     @State private var env: AppConfig.ServerEnv = AppConfig.env
     @State private var hint: String?
+    @State private var testResult: String?
+    @State private var testing = false
 
     var body: some View {
         NavigationStack {
@@ -41,10 +43,29 @@ struct ServerSettingsView: View {
                 }
 
                 Section {
+                    Button {
+                        Task { await testConnection() }
+                    } label: {
+                        HStack {
+                            Text("测试连接")
+                            Spacer()
+                            if testing { ProgressView() }
+                        }
+                    }
+                    .disabled(testing)
+                    if let r = testResult {
+                        Text(r).font(.footnote)
+                            .foregroundStyle(r.hasPrefix("✓") ? Color.green : Color.red)
+                    }
+                }
+
+                Section {
                     Button("保存") { save() }
                     Button("恢复默认", role: .destructive) {
                         AppConfig.setCustomServer("")
                         env = .builtin
+                        text = ""
+                        testResult = nil
                         auth.serverChanged()
                         dismiss()
                     }
@@ -93,6 +114,7 @@ struct ServerSettingsView: View {
             AppConfig.setEnv(e)
             env = e
             text = ""
+            testResult = nil
             hint = "已切换到：\(AppConfig.url(for: e).absoluteString)，请重新登录。"
             auth.serverChanged()
         } label: {
@@ -108,5 +130,19 @@ struct ServerSettingsView: View {
                 .strokeBorder(selected ? Color.accentColor : Color.gray.opacity(0.35), lineWidth: selected ? 2 : 1))
         }
         .buttonStyle(.plain)
+    }
+
+    /// 用公开的 /api/me 探活：2xx 即服务器可达（匿名也返 200），失败透出网络/状态文案。
+    private func testConnection() async {
+        testing = true
+        defer { testing = false }
+        do {
+            _ = try await APIClient.shared.get(MeResponse.self, Endpoint.me)
+            testResult = "✓ 连接成功（\(AppConfig.baseURL.absoluteString)）"
+        } catch let e as APIError {
+            testResult = "✗ \(e.errorDescription ?? "连接失败")"
+        } catch {
+            testResult = "✗ \(error.localizedDescription)"
+        }
     }
 }
