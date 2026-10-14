@@ -9,3 +9,4 @@ config/users.json
 data/**/*.db
 data/tts/**
 tmp/**
+ios/build-device/**
