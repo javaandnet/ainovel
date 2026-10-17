@@ -17,6 +17,8 @@ final class AuthViewModel: ObservableObject {
     @Published var bootstrapping = true
     /// 按需登录弹层：未登录可浏览公开列表，遇到需登录的操作（打开章节 / 401）时置 true 拉起登录 sheet
     @Published var showLogin = false
+    /// 服务器切换计数（单调递增）：供页面 .task(id:) 监听，未登录时 isLoggedIn 不变也能触发重拉
+    @Published private(set) var serverGeneration = 0
 
     var isLoggedIn: Bool { user != nil }
 
@@ -98,9 +100,10 @@ final class AuthViewModel: ObservableObject {
     /// 记住的凭据（供登录页预填）
     var savedCredential: (username: String, password: String)? { KeychainStore.loadCredential() }
 
-    /// 换服务器地址后 Cookie 属另一域，需重新登录
+    /// 换服务器地址后 Cookie 属另一域，需重新登录；同时递增代际让首页等页面自动刷新
     func serverChanged() {
         user = nil
         KeychainStore.clearSession()
+        serverGeneration += 1
     }
 }

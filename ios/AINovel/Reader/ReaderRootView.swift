@@ -9,6 +9,7 @@ struct ReaderRootView: View {
     @State private var search = ""
     @State private var showManage = false
     @State private var showMe = false
+    @State private var showServerSettings = false
     @State private var selectedBook: CatalogNovel?
 
     private var filtered: [CatalogNovel] {
@@ -46,8 +47,9 @@ struct ReaderRootView: View {
             .searchable(text: $search, prompt: "搜索书名")
             .navigationTitle("阅读")
             .refreshable { await lib.refreshCatalog() }
-            // 登录态变化（登录/登出）会影响 VIP 条目是否出现，故按 isLoggedIn 重拉
-            .task(id: auth.isLoggedIn) { await lib.refreshCatalog() }
+            // 登录态变化（登录/登出）会影响 VIP 条目是否出现，故按 isLoggedIn 重拉；
+            // 再拼上服务器切换代际：切环境后（尤其未登录时 isLoggedIn 不变）自动刷新首页
+            .task(id: "\(auth.isLoggedIn)-\(auth.serverGeneration)") { await lib.refreshCatalog() }
             .toolbar { toolbarContent }
         }
         .sheet(item: $selectedBook) { book in
@@ -57,6 +59,7 @@ struct ReaderRootView: View {
         }
         .sheet(isPresented: $showManage) { ManageRootView() }
         .sheet(isPresented: $showMe) { MeView() }
+        .sheet(isPresented: $showServerSettings) { ServerSettingsView() }
     }
 
     @ToolbarContentBuilder
@@ -70,6 +73,10 @@ struct ReaderRootView: View {
             }
         } else {
             // 未登录也能浏览公开书单；右上角登录用于解锁 VIP 与进入管理
+            // 服务器切换入口移到外面：登录按钮旁直接给设置按钮，连不上时不用先绕进登录页
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button { showServerSettings = true } label: { Image(systemName: "gearshape") }
+            }
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button("登录") { auth.requestLogin() }
             }
