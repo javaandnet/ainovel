@@ -45,6 +45,9 @@ targets:
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
         UILaunchScreen: {}
+        # 后台音频：WebView 里 <audio> 朗读要锁屏/切后台继续出声，需声明 audio 后台模式
+        UIBackgroundModes:
+          - audio
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft

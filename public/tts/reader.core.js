@@ -852,6 +852,7 @@
         btn.textContent = '🌐 网页版';
         hint.textContent = '浏览器 TTS，息屏可能无声';
       }
+      loadVoices(); /* 音色下拉随引擎重建 */
     }
 
     /* ===== 4. 控件绑定 ===== */
@@ -1092,8 +1093,9 @@
        永远查不中 → 不管选哪个音色都静默按 YunxiNeural 合成（选了繁体女声却出声简中男声）。
        这里与 loadVoices 共用同一套匹配口径，保证「看到的」与「听到的」是同一个音色。 */
     var VOICE_MATCHERS = [
-      { key: 'meijia', match: function (v) { return /mei[- ]?jia/i.test(v.name); } },
+      /* 默认优先简中女声（Xiaoxiao，晓晓）：xiaozhi 同款、抑扬比云希自然，作为「先试一下」的缺省音 */
       { key: 'tingting', match: function (v) { return /ting[- ]?ting/i.test(v.name); } },
+      { key: 'meijia', match: function (v) { return /mei[- ]?jia/i.test(v.name); } },
       { key: 'google_zh_CN', match: function (v) { return /google/i.test(v.name) && /zh[-_]?CN/i.test(v.lang); } },
       { key: 'google_zh_TW', match: function (v) { return /google/i.test(v.name) && /zh[-_]?TW/i.test(v.lang); } }
     ];
@@ -1102,10 +1104,21 @@
     var EDGE_VOICE = {
       meijia: 'zh-TW-HsiaoChenNeural',       /* 繁中女声 */
       tingting: 'zh-CN-XiaoxiaoNeural',      /* 简中女声 */
-      google_zh_CN: 'zh-CN-YunxiNeural',
+      google_zh_CN: 'zh-CN-XiaoxiaoNeural',  /* Google 普通话也归到晓晓，与预缓存默认一致 */
       google_zh_TW: 'zh-TW-HsiaoChenNeural'
     };
-    var EDGE_VOICE_IDS = ['zh-CN-YunxiNeural', 'zh-CN-XiaoxiaoNeural', 'zh-CN-YunjianNeural', 'zh-TW-HsiaoChenNeural', 'zh-TW-YunJheNeural'];
+    var EDGE_VOICE_IDS = ['zh-CN-XiaoxiaoNeural', 'zh-CN-YunxiNeural', 'zh-CN-YunjianNeural', 'zh-TW-HsiaoChenNeural', 'zh-TW-YunJheNeural', 'en-US-JennyNeural', 'ja-JP-NanamiNeural'];
+    /* 语音版下拉直接列服务端 Edge 音色（id 与后端 ALLOWED_VOICES 一致）：
+       每个都是能听出区别的真音色，不再与浏览器音色名混在一起造成“选了没反应”。 */
+    var EDGE_VOICE_LIST = [
+      { id: 'zh-CN-XiaoxiaoNeural', label: '晓晓 · 简中女（默认）' },
+      { id: 'zh-CN-YunxiNeural', label: '云希 · 简中男' },
+      { id: 'zh-CN-YunjianNeural', label: '云健 · 简中男低音' },
+      { id: 'zh-TW-HsiaoChenNeural', label: '晓臻 · 繁中女' },
+      { id: 'zh-TW-YunJheNeural', label: '云哲 · 繁中男' },
+      { id: 'en-US-JennyNeural', label: 'Jenny · 英文' },
+      { id: 'ja-JP-NanamiNeural', label: 'Nanami · 日文' }
+    ];
     function edgeVoice() {
       var name = voiceSel.value || '';
       if (EDGE_VOICE_IDS.indexOf(name) >= 0) { return name; }
@@ -1119,19 +1132,22 @@
         if (/zh[-_]?TW|Hant/i.test(voices[i].lang)) { return 'zh-TW-HsiaoChenNeural'; }
         if (/zh/i.test(voices[i].lang)) { return 'zh-CN-XiaoxiaoNeural'; }
       }
-      return 'zh-CN-YunxiNeural';
+      return 'zh-CN-XiaoxiaoNeural';
     }
     function edgeRate() {
-      var map = { '0.7': '-20%', '1': '+30%', '1.5': '+50%' };
-      return map[rateEl.value] || '+30%';
+      /* 缺省「中」档回到 +0%（xiaozhi 同款近常速）：+30% 会压平语调、听着赶而机械 */
+      var map = { '0.7': '-20%', '1': '+0%', '1.5': '+30%' };
+      return map[rateEl.value] || '+0%';
     }
     /* TTS 接口与 AI 接口同一前缀口径：站点挂在 /novel 还是根路径都不必重新发布书页 */
     function ttsUrl(path) { return (APP_BASE === null ? '/novel' : APP_BASE) + path; }
 
     function loadVoices() {
+      /* 语音版：下拉列服务端 Edge 音色；网页版：列浏览器本地音色。两套口径不混。 */
+      if (ttsEngine === 'audio') { populateEdgeVoices(); return; }
       var voices = synth.getVoices();
       if (!voices.length) { return; }
-      /* 只保留指定的四种语音：MeiJia、TingTing、Google 普通话、Google 台湾（与 edgeVoice 同口径） */
+      /* 只保留指定的四种语音：TingTing、MeiJia、Google 普通话、Google 台湾（与 edgeVoice 同口径） */
       var wanted = VOICE_MATCHERS;
       var list = [];
       for (var w = 0; w < wanted.length; w++) {
@@ -1156,6 +1172,20 @@
       for (var j = 0; j < list.length; j++) { if (list[j].name === saved) { match = true; } }
       voiceSel.value = match ? saved : list[0].name;
     }
+    /* 语音版音色表：value 直接就是 Edge 音色 ID，edgeVoice() 命中 EDGE_VOICE_IDS 后原样下发 */
+    function populateEdgeVoices() {
+      var saved = '';
+      try { saved = localStorage.getItem('ttsEdgeVoice') || ''; } catch (e2) {}
+      voiceSel.innerHTML = '';
+      for (var i = 0; i < EDGE_VOICE_LIST.length; i++) {
+        var v = EDGE_VOICE_LIST[i];
+        var o = document.createElement('option');
+        o.value = v.id;
+        o.textContent = v.label;
+        voiceSel.appendChild(o);
+      }
+      voiceSel.value = (saved && EDGE_VOICE_IDS.indexOf(saved) >= 0) ? saved : 'zh-CN-XiaoxiaoNeural';
+    }
     loadVoices();
     ensureVoicesReady();
     synth.onvoiceschanged = function () { voicesReady = true; loadVoices(); };
@@ -1173,7 +1203,13 @@
       /* 改完当场见效：正在播的这句按新留白重新判一次位置（提前量落在尾静音里，不会切字） */
       maybeAdvance();
     });
-    voiceSel.addEventListener('change', function () { try { localStorage.setItem('ttsVoiceName', voiceSel.value); } catch (e5) {} });
+    voiceSel.addEventListener('change', function () {
+      /* 按当前模式分别记忆：语音版存 Edge ID，网页版存浏览器音色名，互不污染 */
+      try {
+        if (ttsEngine === 'audio') { localStorage.setItem('ttsEdgeVoice', voiceSel.value); }
+        else { localStorage.setItem('ttsVoiceName', voiceSel.value); }
+      } catch (e5) {}
+    });
     autoEl.addEventListener('click', function () {
       autoEl.classList.toggle('active');
       try { localStorage.setItem('ttsAutoNext', autoEl.classList.contains('active') ? '1' : '0'); } catch (e6) {}
@@ -1212,6 +1248,7 @@
       engineBtn.textContent = '🎵 语音版';
       engineHint.textContent = '服务端 mp3，息屏有声（需网络）';
     }
+    loadVoices(); /* 初始那次 loadVoices 按默认 browser 建的，这里按已解析的引擎重建 */
     engineBtn.addEventListener('click', function () {
       switchEngine(ttsEngine === 'browser' ? 'audio' : 'browser');
     });

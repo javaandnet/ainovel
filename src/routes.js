@@ -25,7 +25,7 @@ import * as store from './auth/userStore.js';
 import { requireAuth, requireSuperadmin, currentUser, setSessionCookie, clearSessionCookie } from './auth/session.js';
 import { BASE_PATH, sitePath } from './base.js';
 import { generateQuiz, explainSentence, explainWord, vocabExplainStatus, askQuestion, answerFeedback, pickVocab } from './reader/aiService.js';
-import { synthesize as ttsSynthesize, computeHash as ttsComputeHash, auditAudio as ttsAudit, pruneAudio as ttsPrune } from './reader/ttsStore.js';
+import { synthesize as ttsSynthesize, synthesizeParagraph as ttsSynthesizeParagraph, computeHash as ttsComputeHash, auditAudio as ttsAudit, pruneAudio as ttsPrune } from './reader/ttsStore.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -456,7 +456,7 @@ export function registerRoutes(app) {
   /* TTS 音频合成：句子级 mp3，带存在性校验防滥用 */
   app.post('/api/tts/sentence', ttsRateLimit, async (req, res) => {
     try {
-      const { chapterUrl, text, voice, rate } = req.body || {};
+      const { chapterUrl, text, voice, rate, style, engine } = req.body || {};
       if (!chapterUrl || !text || !voice || !rate) {
         return res.status(400).json({ error: '缺少参数：chapterUrl, text, voice, rate' });
       }
@@ -478,8 +478,8 @@ export function registerRoutes(app) {
       if (!contentMatch) {
         return res.status(400).json({ error: '章节无正文内容' });
       }
-      // 合成
-      const result = await ttsSynthesize(text, voice, rate);
+      // 合成（style/engine 仅 Azure 生效；Edge 自动忽略，缺 Azure 凭证时引擎层自动回落 Edge）
+      const result = await ttsSynthesize(text, voice, rate, { style, engine });
       if (!result || !result.ok) return ttsFail(res, '句子', result);
       res.json({ ok: true, hash: result.hash, audioPath: ttsAudioUrl(result.filePath), bytes: result.bytes, tailPadMs: result.tailPadMs ?? null });
     } catch (e) {
@@ -506,6 +506,37 @@ export function registerRoutes(app) {
       }
       const result = await ttsSynthesize(text, voice, rate);
       if (!result || !result.ok) return ttsFail(res, '讲解', result);
+      res.json({ ok: true, hash: result.hash, audioPath: ttsAudioUrl(result.filePath), bytes: result.bytes, tailPadMs: result.tailPadMs ?? null });
+    } catch (e) {
+      readerErr(res, e);
+    }
+  });
+
+  /* TTS 段落级合成：一整段一次合成（Azure 走 <break> 保留跨句韵律；Edge 退化为一整段读）。
+   * 逐句朗读的「句间断一下」根因是每句单独合成、韵律不连；段落模式把整段交给上游，
+   * 由 <break time> 控制句间留白，听感更接近连贯朗读。缓存以「整段文本」为单位。
+   * 注：需前端朗读器改成按段请求才能命中此缓存；当前逐句读者仍走 /api/tts/sentence。 */
+  app.post('/api/tts/paragraph', ttsRateLimit, async (req, res) => {
+    try {
+      const { chapterUrl, paragraph, voice, rate, style, engine, breakMs } = req.body || {};
+      if (!chapterUrl || !paragraph || !voice || !rate) {
+        return res.status(400).json({ error: '缺少参数：chapterUrl, paragraph, voice, rate' });
+      }
+      if (!ALLOWED_VOICES.has(voice)) {
+        return res.status(400).json({ error: `不支持的音色：${voice}` });
+      }
+      if (!ALLOWED_RATES.has(rate)) {
+        return res.status(400).json({ error: `不支持的语速：${rate}` });
+      }
+      const chapter = resolveChapterFile(chapterUrl);
+      if (!chapter.ok) {
+        if (chapter.detail) console.warn(`[tts] 章节定位失败（${chapter.status}）：${chapter.detail}`);
+        return res.status(chapter.status).json({ error: chapter.error });
+      }
+      const result = await ttsSynthesizeParagraph(paragraph, voice, rate, {
+        style, engine, breakMs: Number.isFinite(Number(breakMs)) ? Number(breakMs) : undefined,
+      });
+      if (!result || !result.ok) return ttsFail(res, '段落', result);
       res.json({ ok: true, hash: result.hash, audioPath: ttsAudioUrl(result.filePath), bytes: result.bytes, tailPadMs: result.tailPadMs ?? null });
     } catch (e) {
       readerErr(res, e);

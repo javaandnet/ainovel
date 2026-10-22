@@ -16,14 +16,16 @@
  * 白等约 0.84s，听感就是「两句之间断一下」。裁剪是无损整帧丢弃，且把实际留下的
  * 尾部留白 tailPadMs 一并记库、随接口回给前端，前端据此决定何时跨句。
  *
- * 合成引擎：msedge-tts（Node 端口，纯 JS，走微软公开边缘接口，免 key）。
- * 该接口对同一来源的并发连接很敏感（一句一发 WebSocket，整章上百句齐发容易被限流），
- * 因此进程内收一道并发闸 + 同句去重 + 失败退避重试一次；对外仍不抛异常，
- * 只回 { ok:false, error }，由调用方降级为浏览器 speechSynthesis。
+ * 合成引擎：可切换（见 ttsEngines.js）——默认 msedge-tts（微软边缘接口，免 key，中性音色），
+ * 配了 AZURE_SPEECH_KEY/REGION 且 NOVEL_TTS_ENGINE=azure 时切 Azure（express-as 情感风格 + 段落级 <break>）。
+ * 无论哪家，都是「一个朗读单元一发」：Edge/逐句 Azure 单元 = 一句；段落级 Azure 单元 = 一整段。
+ * 该层对上游并发敏感（一句/段一发，整章上百发易被限流），因此进程内收一道并发闸 + 同单元去重 +
+ * 失败退避重试一次；对外仍不抛异常，只回 { ok:false, error }，由调用方降级为浏览器 speechSynthesis。
  */
 import Database from 'better-sqlite3';
 import { GLOBAL_DB } from '../auth/userStore.js';
-import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
+import { resolveEngine, resolveStyle, DEFAULT_BREAK_MS } from './ttsEngines.js';
+import { splitParagraphSentences } from './ttsText.js';
 import { parse as mp3Parse, cut as mp3Cut } from './mp3Cut.js';
 import { probeSilence, ffmpegAvailable } from './silenceProbe.js';
 import fs from 'fs-extra';
@@ -72,9 +74,14 @@ function db() {
   }
 }
 
-/** 计算缓存键：sha1(text|voice|rate) */
-export function computeHash(text, voice, rate) {
-  return crypto.createHash('sha1').update(`${text}|${voice}|${rate}`).digest('hex');
+/**
+ * 计算缓存键：sha1(text|voice|rate)，Azure 等带情感风格的再加一段 style。
+ * 关键：style 为空时键与改造前【完全一致】——Edge 老缓存照旧命中（复用现有缓存键）；
+ * 只有 Azure 传了 style 才多占一段，做到「同句不同情感」各存各的、互不覆盖。
+ */
+export function computeHash(text, voice, rate, style) {
+  const base = style ? `${text}|${voice}|${rate}|${style}` : `${text}|${voice}|${rate}`;
+  return crypto.createHash('sha1').update(base).digest('hex');
 }
 
 /** 固定落点：data/tts/<hash[:2]>/<hash>.mp3（DB 只是索引，路径本身可由 hash 推出） */
@@ -248,18 +255,20 @@ function sweepTmp(keepMs = 60000) {
   }
 }
 
-/** 真正走一次微软边缘接口：合成到临时目录 → 落正式位置。失败一律抛出，由上层决定重试。 */
-async function synthOnce(text, voice, rate, hash) {
+/**
+ * 真正走一次上游：交给选定引擎产出 mp3 到临时目录 → 落正式位置 → 裁首尾静音。失败一律抛出，由上层决定重试。
+ * engine 由 synthesize 选定并透传；ctx.style/segments/breakMs 仅 Azure 段落模式会真正吃到。
+ */
+async function synthOnce(text, voice, rate, hash, engine, ctx = {}) {
   sweepTmp();
   const tmpDir = path.join(TTS_ROOT, '_tmp', `${Date.now()}-${Math.random().toString(36).slice(2)}`);
   fs.ensureDirSync(tmpDir);
-  let tts = null;
+  let closer = null;
   let moved = false;
   try {
-    tts = new MsEdgeTTS();
-    await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3, { sentenceBoundaryEnabled: false });
-    const result = await tts.toFile(tmpDir, text, { rate: rate || '+0%' });
-    const audioFile = result && result.audioFilePath;
+    const out = await engine.synthesizeToFile(text, voice, rate, { tmpDir, ...ctx });
+    const audioFile = out && out.filePath;
+    if (out && out.closer) closer = out.closer;
     if (!audioFile || !fs.existsSync(audioFile)) throw new Error('合成无产物（多为上游限流或断流）');
     const bytes = fs.statSync(audioFile).size;
     if (!bytes) throw new Error('合成产物为空文件');
@@ -280,37 +289,44 @@ async function synthOnce(text, voice, rate, hash) {
     }
     return { ok: true, hash, filePath: dest, bytes: outBytes, tailPadMs };
   } finally {
-    try { if (tts && tts.close) tts.close(); } catch { /* 关闭失败不影响结果 */ }
+    try { if (closer) closer(); } catch { /* 释放上游连接失败不影响结果 */ }
     /* 只有产物确实被我们移走了才清目录；失败路径交给 sweepTmp 延后回收 */
     if (moved) { Promise.resolve(fs.remove(tmpDir)).catch(() => {}); }
   }
 }
 
 /**
- * 合成一句音频。
- * @param {string} text 句子文本
- * @param {string} voice Edge 音色名（如 zh-CN-YunxiNeural）
+ * 合成一个朗读单元（默认一句）。
+ * @param {string} text 单元文本
+ * @param {string} voice 音色名（Edge/Azure 共用同一批 Neural 名，如 zh-CN-YunxiNeural）
  * @param {string} rate 语速（如 +0%、-20%、+50%）
+ * @param {{engine?:string, style?:string, segments?:string[], breakMs?:number}} [opts]
+ *        engine 指定引擎（默认按 NOVEL_TTS_ENGINE 解析，缺凭证自动回落 edge）；style 仅 Azure 生效；
+ *        segments+breakMs 用于段落级 <break> 拼接（Azure），同时决定缓存键是否含 style。
  * @returns {Promise<{ok:boolean, hash:string, filePath?:string, bytes?:number, tailPadMs?:number|null, error?:string}>}
  */
-export async function synthesize(text, voice, rate) {
-  const hash = computeHash(text, voice, rate);
+export async function synthesize(text, voice, rate, opts = {}) {
+  const engine = resolveEngine(opts.engine);
+  // style 在算缓存键前解析：azure 且未显式指定时逐句自动推断情感（Edge 恒为空→老键不变）
+  const style = resolveStyle(engine, opts.style, text);
+  const hash = computeHash(text, voice, rate, style);
   const cached = getCached(hash);
   if (cached) return { ok: true, hash, ...cached };
 
   const pending = _inflight.get(hash);
-  if (pending) return pending;          /* 同一句正在合成（章节里重复句很常见），并入 */
+  if (pending) return pending;          /* 同一单元正在合成（章节里重复句很常见），并入 */
 
   const job = (async () => {
     await acquire();
     try {
+      const ctx = { style, segments: opts.segments, breakMs: opts.breakMs ?? DEFAULT_BREAK_MS };
       try {
-        return await synthOnce(text, voice, rate, hash);
+        return await synthOnce(text, voice, rate, hash, engine, ctx);
       } catch (first) {
         /* 退避一次再试：并发/瞬时网络抖动居多，重试比把失败甩给读者划算 */
         await sleep(500 + Math.floor(Math.random() * 500));
         try {
-          return await synthOnce(text, voice, rate, hash);
+          return await synthOnce(text, voice, rate, hash, engine, ctx);
         } catch (second) {
           return { ok: false, hash, error: `${first.message}（重试仍失败：${second.message}）` };
         }
@@ -323,6 +339,20 @@ export async function synthesize(text, voice, rate) {
 
   _inflight.set(hash, job);
   return job;
+}
+
+/**
+ * 段落级合成：把一整段按句拆开，Azure 用 <break> 一次合成成一整段 mp3（保留跨句韵律，缓解机械感）。
+ * Edge 不支持 break：自动退化为「整段一次读」（微软边缘接口本身能吃多句，停顿由标点自然给出）。
+ * 缓存键以「整段文本」为单位（含 style），与逐句模式的键空间互不冲突。
+ * @param {string} paragraphText 一整段朗读文本
+ * @param {string} voice
+ * @param {string} rate
+ * @param {{engine?:string, style?:string, breakMs?:number}} [opts]
+ */
+export async function synthesizeParagraph(paragraphText, voice, rate, opts = {}) {
+  const segments = splitParagraphSentences(paragraphText);
+  return synthesize(paragraphText, voice, rate, { ...opts, segments });
 }
 
 /**

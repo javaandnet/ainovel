@@ -33,6 +33,10 @@
 	</dict>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>语音提问需要麦克风录音，你的声音仅用于转写后提交，不存储原始音频。</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>
