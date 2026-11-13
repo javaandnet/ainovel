@@ -28,7 +28,7 @@ struct ServerSettingsView: View {
                 }
 
                 Section {
-                    TextField("例如 192.168.1.55:3400 或 novel.example.com", text: $text)
+                    TextField("例如 192.168.1.11:3400 或 novel.example.com", text: $text)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)

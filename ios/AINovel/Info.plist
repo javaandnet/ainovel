@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>AINovelBaseURL</key>
-	<string>http://192.168.1.55:3400/novel</string>
+	<string>http://192.168.1.11:3400/novel</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>zh-Hans</string>
 	<key>CFBundleDisplayName</key>

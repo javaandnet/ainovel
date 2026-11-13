@@ -309,7 +309,9 @@ export async function synthesize(text, voice, rate, opts = {}) {
   const engine = resolveEngine(opts.engine);
   // style 在算缓存键前解析：azure 且未显式指定时逐句自动推断情感（Edge 恒为空→老键不变）
   const style = resolveStyle(engine, opts.style, text);
-  const hash = computeHash(text, voice, rate, style);
+  // 转换引擎（bridge）可能用同名 Edge 音色走 edge-prosody 拟合，产物与直连 Edge 不同：
+  // 把引擎名占进 style 段单独建档；vc_ 克隆音色本就只属于 bridge，键空间天然隔离。
+  const hash = computeHash(text, voice, rate, engine.name === 'bridge' ? 'bridge' : style);
   const cached = getCached(hash);
   if (cached) return { ok: true, hash, ...cached };
 

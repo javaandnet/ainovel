@@ -15,10 +15,15 @@
  * 说明：text 是「一个朗读单元」（读者模式 = 一句；段落模式 = 一整段）。
  * 段落模式下 segments（句数组）与 breakMs（句间停顿毫秒）用于拼 <break>，避免逐句合成造成的跨句韵律断裂。
  * edge 不支持 style/break：把单元原样交给微软边缘接口，情感风格自动降级为「中性朗读」。
+ *
+ * 转换引擎 bridge（2026-11 追加）：把朗读单元交给本地 aibridge 的音频口（POST /api/bridge/tts），
+ * 用零样本克隆音色（vc_xxx）做真正的音色转换；产物同样走 ttsStore 的句子级缓存。
+ * 桥接地址与 Key 复用 llm.js 的推理链路配置（控制台覆盖 > 环境变量 > .env），不再另设一份。
  */
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
 import fs from 'fs-extra';
 import path from 'path';
+import { bridgeUrl, bridgeKey } from '../agent/llm.js';
 
 /* ── 通用小工具 ── */
 const xmlEscape = (s) => String(s)
@@ -100,9 +105,94 @@ class AzureEngine {
   }
 }
 
+/* ── Bridge：aibridge 音频网关（转换引擎：零样本克隆音色 vc_xxx 的音色转换）──
+ * 上游契约（routes/bridge.js / routes/audio.js）：
+ *   POST {base}/api/bridge/tts   请求 { text, voice, rate_pct }，x-api-key 鉴权
+ *   响应 { ok, audio_base64, mime, voice, backend, ... }；克隆音色由网关分发到本机 F5/CosyVoice2。
+ * 与 azure 的静默回落不同：vc 音色只有本网关能合成，缺 Key / 网关不可用时直接抛带原因的错，
+ * 让调用方明确报「转换引擎不可用」，绝不悄悄换成 Edge 出一口错的音色。 */
+class BridgeEngine {
+  constructor() {
+    this.name = 'bridge';
+    this.supportsStyle = false;
+    this._voicesCache = null;   /* { at, data } —— 音色清单进程内缓存 30s，列表页反复打开不打爆桥接 */
+  }
+  /** 由 chat 端点地址推导同一 host 的桥接根（与 llm.js probeIdentity 同口径） */
+  endpoint() {
+    const chat = bridgeUrl();
+    let base;
+    try {
+      const u = new URL(chat);
+      base = `${u.protocol}//${u.host}`;
+    } catch {
+      base = String(chat).replace(/\/api\/bridge\/.*$/, '');
+    }
+    return { api: `${base}/api/bridge`, key: bridgeKey() };
+  }
+  available() { return !!this.endpoint().key; }
+
+  /** '+30%' / '-20%' / '1.5' → 百分数数值（aibridge rate_pct 口径） */
+  ratePct(rate) {
+    const n = Number(String(rate || '').replace(/[+%]/g, ''));
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  async synthesizeToFile(text, voice, rate, ctx) {
+    const { api, key } = this.endpoint();
+    if (!key) throw new Error('转换引擎不可用：未配置 aibridge API Key（.env AIBRIDGE_API_KEY 或控制台推理链路）');
+    const isClone = /^vc_/i.test(String(voice));
+    /* 克隆音色走本机神经网络（RTF≈1），耗时与字数成正比：超时下限对齐 aibridge 侧 cloneFloor，
+       拿 60s 默认去等一整段合成必然错报超时 */
+    const timeoutMs = isClone ? Math.min(1800000, 90000 + [...String(text)].length * 900) : 60000;
+    const res = await fetch(`${api}/tts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': key },
+      body: JSON.stringify({ text, voice, rate_pct: this.ratePct(rate) }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok || !data.audio_base64) {
+      const detail = String(data.error || data.message || res.statusText || '无音频返回').slice(0, 200);
+      throw new Error(`aibridge TTS ${res.status}：${detail}（端点 ${api}/tts）`);
+    }
+    const buf = Buffer.from(data.audio_base64, 'base64');
+    if (!buf.length) throw new Error('aibridge TTS 返回空音频');
+    const filePath = path.join(ctx.tmpDir, `bridge-${Date.now()}-${Math.random().toString(36).slice(2)}.mp3`);
+    fs.writeFileSync(filePath, buf);
+    return { filePath };
+  }
+
+  /** 克隆音色清单：GET {base}/api/bridge/voice/list（30s 缓存）。
+   *  失败不抛：返回 { ok:false, voices:[], error } —— 前端据此隐藏「音色转换」选项组，不阻断朗读。 */
+  async listVoices(force = false) {
+    if (!force && this._voicesCache && Date.now() - this._voicesCache.at < 30000) return this._voicesCache.data;
+    const { api, key } = this.endpoint();
+    let data;
+    if (!key) {
+      data = { ok: false, voices: [], error: '转换引擎未配置（缺 aibridge API Key）' };
+    } else {
+      try {
+        const res = await fetch(`${api}/voice/list`, {
+          headers: { 'x-api-key': key },
+          signal: AbortSignal.timeout(8000),
+        });
+        const j = await res.json().catch(() => ({}));
+        data = (res.ok && j.ok && Array.isArray(j.voices))
+          ? { ok: true, voices: j.voices.map((v) => ({ id: v.id, name: v.name, engine: v.engine, gender: v.gender })) }
+          : { ok: false, voices: [], error: `桥接返回异常（HTTP ${res.status}）：${String(j.error || '').slice(0, 120) || '无音色数据'}` };
+      } catch (e) {
+        data = { ok: false, voices: [], error: `连不上 ${api}/voice/list：${e.message}` };
+      }
+    }
+    this._voicesCache = { at: Date.now(), data };
+    return data;
+  }
+}
+
 const edge = new EdgeEngine();
 const azure = new AzureEngine();
-const REGISTRY = { edge, azure };
+const bridge = new BridgeEngine();
+const REGISTRY = { edge, azure, bridge };
 
 /** 默认情感风格（仅 azure 生效）：narration 适合小说旁白，读起来最不像「播报」。 */
 const DEFAULT_AZURE_STYLE = process.env.AZURE_TTS_STYLE || 'narration';
@@ -181,4 +271,4 @@ export function normalizeStyle(engine, style) {
   return v || (engine.name === 'azure' ? DEFAULT_AZURE_STYLE : '');
 }
 
-export { edge, azure, DEFAULT_BREAK_MS, DEFAULT_AZURE_STYLE };
+export { edge, azure, bridge, DEFAULT_BREAK_MS, DEFAULT_AZURE_STYLE };

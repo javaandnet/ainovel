@@ -40,7 +40,7 @@ targets:
         NSMicrophoneUsageDescription: 语音提问需要麦克风录音，你的声音仅用于转写后提交，不存储原始音频。
         # 站点根地址：真机测试指向 Mac 局域网 IP（需与后端同一 Wi-Fi，ainovel 默认端口 3400、挂在 /novel 前缀）；
         # TestFlight/生产包必须改为可公网访问的 HTTPS 域名。App 内「服务器设置」可覆盖此值。
-        AINovelBaseURL: http://192.168.1.55:3400/novel
+        AINovelBaseURL: http://192.168.1.11:3400/novel
         # 本地真机测试允许 HTTP（服务器无 TLS 证书）；上架/生产构建前必须移除
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true

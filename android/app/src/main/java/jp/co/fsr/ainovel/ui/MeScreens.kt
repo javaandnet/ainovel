@@ -105,7 +105,7 @@ fun ServerSettingsCard() {
             value = text,
             onValueChange = { text = it; hint = null },
             label = { Text("服务器地址") },
-            placeholder = { Text("例如 192.168.1.55:3400 或 novel.example.com") },
+            placeholder = { Text("例如 192.168.1.11:3400 或 novel.example.com") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )

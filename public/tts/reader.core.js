@@ -1108,6 +1108,16 @@
       google_zh_TW: 'zh-TW-HsiaoChenNeural'
     };
     var EDGE_VOICE_IDS = ['zh-CN-XiaoxiaoNeural', 'zh-CN-YunxiNeural', 'zh-CN-YunjianNeural', 'zh-TW-HsiaoChenNeural', 'zh-TW-YunJheNeural', 'en-US-JennyNeural', 'ja-JP-NanamiNeural'];
+    /* 转换音色（aibridge 零样本克隆 vc_xxx）：清单由 /api/tts/voices 动态拉，拉不到就隐藏选项组 */
+    var CLONE_VOICES = null;   /* null=未拉过；[]=不可用/无克隆；否则 [{id,name,engine}] */
+    function isCloneVoice(name) { return String(name || '').indexOf('vc_') === 0; }
+    function fetchCloneVoices(done) {
+      fetch(ttsUrl('/api/tts/voices')).then(function (r) { return r.json(); }).then(function (j) {
+        CLONE_VOICES = (j && j.ok && Array.isArray(j.voices)) ? j.voices : [];
+        done();
+      }).catch(function () { CLONE_VOICES = []; done(); });
+    }
+    function voiceKnown(name) { return EDGE_VOICE_IDS.indexOf(name) >= 0 || isCloneVoice(name); }
     /* 语音版下拉直接列服务端 Edge 音色（id 与后端 ALLOWED_VOICES 一致）：
        每个都是能听出区别的真音色，不再与浏览器音色名混在一起造成“选了没反应”。 */
     var EDGE_VOICE_LIST = [
@@ -1122,6 +1132,8 @@
     function edgeVoice() {
       var name = voiceSel.value || '';
       if (EDGE_VOICE_IDS.indexOf(name) >= 0) { return name; }
+      /* 转换音色（vc_xxx）原样下发：服务端按前缀认并自动路由到转换引擎合成 */
+      if (isCloneVoice(name)) { return name; }
       var voices = synth.getVoices();
       for (var i = 0; i < voices.length; i++) {
         if (voices[i].name !== name) { continue; }
@@ -1172,7 +1184,8 @@
       for (var j = 0; j < list.length; j++) { if (list[j].name === saved) { match = true; } }
       voiceSel.value = match ? saved : list[0].name;
     }
-    /* 语音版音色表：value 直接就是 Edge 音色 ID，edgeVoice() 命中 EDGE_VOICE_IDS 后原样下发 */
+    /* 语音版音色表：value 直接就是 Edge 音色 ID / 克隆音色 id，edgeVoice() 命中后原样下发；
+       拉到克隆音色时追加「音色转换」选项组（服务端对 vc_ 自动走转换引擎，这里不必传 engine） */
     function populateEdgeVoices() {
       var saved = '';
       try { saved = localStorage.getItem('ttsEdgeVoice') || ''; } catch (e2) {}
@@ -1184,7 +1197,26 @@
         o.textContent = v.label;
         voiceSel.appendChild(o);
       }
-      voiceSel.value = (saved && EDGE_VOICE_IDS.indexOf(saved) >= 0) ? saved : 'zh-CN-XiaoxiaoNeural';
+      if (CLONE_VOICES && CLONE_VOICES.length) {
+        var grp = document.createElement('optgroup');
+        grp.label = '音色转换（本地克隆）';
+        for (var c = 0; c < CLONE_VOICES.length; c++) {
+          var cv = CLONE_VOICES[c];
+          var co = document.createElement('option');
+          co.value = cv.id;
+          co.textContent = (cv.name || cv.id) + ' · ' + (cv.engine || 'clone') + ' 转换';
+          grp.appendChild(co);
+        }
+        voiceSel.appendChild(grp);
+      }
+      var want = (saved && voiceKnown(saved)) ? saved : 'zh-CN-XiaoxiaoNeural';
+      /* 克隆音色还没拉到时就先选 Edge 默认，拉到后重建选项表再恢复 saved */
+      var has = false;
+      for (var k = 0; k < voiceSel.options.length; k++) { if (voiceSel.options[k].value === want) { has = true; break; } }
+      voiceSel.value = has ? want : 'zh-CN-XiaoxiaoNeural';
+      if (CLONE_VOICES === null) {
+        fetchCloneVoices(function () { populateEdgeVoices(); });
+      }
     }
     loadVoices();
     ensureVoicesReady();

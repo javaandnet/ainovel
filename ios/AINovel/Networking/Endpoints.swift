@@ -47,4 +47,6 @@ enum Endpoint {
 
     // TTS（公开）
     static let ttsSentence = "api/tts/sentence"
+    /// 转换引擎克隆音色清单（GET；桥接不可用时 ok:false + 空列表）
+    static let ttsVoices = "api/tts/voices"
 }

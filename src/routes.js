@@ -26,6 +26,7 @@ import { requireAuth, requireSuperadmin, currentUser, setSessionCookie, clearSes
 import { BASE_PATH, sitePath } from './base.js';
 import { generateQuiz, explainSentence, explainWord, vocabExplainStatus, askQuestion, answerFeedback, pickVocab } from './reader/aiService.js';
 import { synthesize as ttsSynthesize, synthesizeParagraph as ttsSynthesizeParagraph, computeHash as ttsComputeHash, auditAudio as ttsAudit, pruneAudio as ttsPrune } from './reader/ttsStore.js';
+import { bridge as ttsBridgeEngine } from './reader/ttsEngines.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -442,6 +443,20 @@ export function registerRoutes(app) {
   ]);
   const ALLOWED_RATES = new Set(['-20%', '+0%', '+30%', '+50%']);
 
+  /* ── 转换引擎（aibridge）音色口径 ──
+   * 克隆音色档案（vc_xxxxxxxx）由桥接侧动态维护，无法进静态白名单：按前缀认。
+   * 选了 vc 音色就强制走 bridge 引擎（前端不用传 engine）；bridge 缺 Key 时直接拒——
+   * Edge 合成不了 vc 音色，静默回落只会把定位成本丢给读者。 */
+  const CLONE_VOICE_RE = /^vc_[\w.-]+$/;
+  const voiceAllowed = (voice) => ALLOWED_VOICES.has(voice) || CLONE_VOICE_RE.test(String(voice || ''));
+  const engineFor = (engine, voice) => (CLONE_VOICE_RE.test(String(voice || '')) ? 'bridge' : engine);
+  const bridgeGate = (engine, res, stage) => {
+    if (engine === 'bridge' && !ttsBridgeEngine.available()) {
+      return ttsFail(res, stage, { error: '转换引擎不可用：未配置 aibridge API Key（.env AIBRIDGE_API_KEY 或控制台推理链路）' });
+    }
+    return null;
+  };
+
   /* TTS 合成结果 → 对外音频 URL：路径必须带 BASE_PATH。线上同域名下根级 /tts-audio/* 会被
    * nginx 分给 aiinterview，它回 200 text/html（实测 454B）而不是 mp3，<audio> 拿到 HTML 必挂。
    * 合成失败则把具体原因回给前端并记日志：全章生成是逐句批量，只回「合成失败」无法定位。 */
@@ -456,16 +471,19 @@ export function registerRoutes(app) {
   /* TTS 音频合成：句子级 mp3，带存在性校验防滥用 */
   app.post('/api/tts/sentence', ttsRateLimit, async (req, res) => {
     try {
-      const { chapterUrl, text, voice, rate, style, engine } = req.body || {};
+      const { chapterUrl, text, voice, rate, style, engine: engineOpt } = req.body || {};
       if (!chapterUrl || !text || !voice || !rate) {
         return res.status(400).json({ error: '缺少参数：chapterUrl, text, voice, rate' });
       }
-      if (!ALLOWED_VOICES.has(voice)) {
+      if (!voiceAllowed(voice)) {
         return res.status(400).json({ error: `不支持的音色：${voice}` });
       }
       if (!ALLOWED_RATES.has(rate)) {
         return res.status(400).json({ error: `不支持的语速：${rate}` });
       }
+      const engine = engineFor(engineOpt, voice);
+      const gate = bridgeGate(engine, res, '句子');
+      if (gate) return gate;
       /* 存在性校验：URL 各段先百分号解码再拼路径（中文书名目录在 URL 里是编码态） */
       const chapter = resolveChapterFile(chapterUrl);
       if (!chapter.ok) {
@@ -490,21 +508,24 @@ export function registerRoutes(app) {
   /* TTS 音频合成：讲解文字 / AI 问答结果（无章节存在性校验，有长度限制） */
   app.post('/api/tts/explain', ttsRateLimit, async (req, res) => {
     try {
-      const { text, voice, rate } = req.body || {};
+      const { text, voice, rate, engine: engineOpt } = req.body || {};
       if (!text || !voice || !rate) {
         return res.status(400).json({ error: '缺少参数：text, voice, rate' });
       }
-      if (!ALLOWED_VOICES.has(voice)) {
+      if (!voiceAllowed(voice)) {
         return res.status(400).json({ error: `不支持的音色：${voice}` });
       }
       if (!ALLOWED_RATES.has(rate)) {
         return res.status(400).json({ error: `不支持的语速：${rate}` });
       }
+      const engine = engineFor(engineOpt, voice);
+      const gate = bridgeGate(engine, res, '讲解');
+      if (gate) return gate;
       // 长度限制：讲解文本通常不超过 2000 字，超过则拒绝
       if (text.length > 2000) {
         return res.status(400).json({ error: `文本过长（${text.length} 字，上限 2000）` });
       }
-      const result = await ttsSynthesize(text, voice, rate);
+      const result = await ttsSynthesize(text, voice, rate, engine ? { engine } : {});
       if (!result || !result.ok) return ttsFail(res, '讲解', result);
       res.json({ ok: true, hash: result.hash, audioPath: ttsAudioUrl(result.filePath), bytes: result.bytes, tailPadMs: result.tailPadMs ?? null });
     } catch (e) {
@@ -518,16 +539,19 @@ export function registerRoutes(app) {
    * 注：需前端朗读器改成按段请求才能命中此缓存；当前逐句读者仍走 /api/tts/sentence。 */
   app.post('/api/tts/paragraph', ttsRateLimit, async (req, res) => {
     try {
-      const { chapterUrl, paragraph, voice, rate, style, engine, breakMs } = req.body || {};
+      const { chapterUrl, paragraph, voice, rate, style, engine: engineOpt, breakMs } = req.body || {};
       if (!chapterUrl || !paragraph || !voice || !rate) {
         return res.status(400).json({ error: '缺少参数：chapterUrl, paragraph, voice, rate' });
       }
-      if (!ALLOWED_VOICES.has(voice)) {
+      if (!voiceAllowed(voice)) {
         return res.status(400).json({ error: `不支持的音色：${voice}` });
       }
       if (!ALLOWED_RATES.has(rate)) {
         return res.status(400).json({ error: `不支持的语速：${rate}` });
       }
+      const engine = engineFor(engineOpt, voice);
+      const gate = bridgeGate(engine, res, '段落');
+      if (gate) return gate;
       const chapter = resolveChapterFile(chapterUrl);
       if (!chapter.ok) {
         if (chapter.detail) console.warn(`[tts] 章节定位失败（${chapter.status}）：${chapter.detail}`);
@@ -541,6 +565,15 @@ export function registerRoutes(app) {
     } catch (e) {
       readerErr(res, e);
     }
+  });
+
+  /* 转换引擎的克隆音色清单（供网页版/iOS 音色下拉建「音色转换」选项组）：
+   * 代理桥接侧 GET /api/bridge/voice/list，引擎内 30s 缓存。
+   * 不可用（缺 Key / 云端无此路由 / 桥接离线）时回 { ok:false, voices:[], error }，
+   * 前端隐藏选项组即可——这不是朗读的硬依赖，不能让它报错阻断设置页。 */
+  app.get('/api/tts/voices', ttsRateLimit, async (_req, res) => {
+    const data = await ttsBridgeEngine.listVoices();
+    res.json({ ...data, engine: 'bridge' });
   });
 
   // ── 公开书单（读者无需登录）：扫描各用户已发布站点 ──

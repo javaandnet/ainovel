@@ -21,6 +21,17 @@ struct ReaderSettingsPanel: View {
     @State private var learnAge = "9"
     @State private var pinyin = false
     @State private var syncing = true
+    /// 转换引擎克隆音色（后端 /api/tts/voices 动态拉；桥接不可用时为空，不显示选项组）
+    @State private var cloneVoices: [CloneVoice] = []
+
+    /// 与页内音色下拉同源：服务端代理 aibridge 的克隆音色清单
+    struct CloneVoice: Decodable, Identifiable, Hashable {
+        let id: String
+        let name: String?
+        let engine: String?
+        var label: String { "转换 · \(name ?? id)（\(engine ?? "clone")）" }
+    }
+    private struct TtsVoicesResponse: Decodable { let ok: Bool; let voices: [CloneVoice]? }
 
     private static let rateNames = ["0.7": "慢", "1": "中", "1.5": "快"]
     private static let gapNames = ["0": "紧贴", "250": "自然", "600": "舒缓"]
@@ -55,9 +66,21 @@ struct ReaderSettingsPanel: View {
                         }
                     Picker("音色", selection: $voiceId) {
                         ForEach(Voice.allCases, id: \.rawValue) { Text($0.label).tag($0.rawValue) }
+                        if !cloneVoices.isEmpty {
+                            Section("音色转换（本地克隆）") {
+                                ForEach(cloneVoices) { Text($0.label).tag($0.id) }
+                            }
+                        }
                     }
                     .onChange(of: voiceId) { _, v in
-                        Task { await bridge.applyVoice(v) }
+                        Task {
+                            // vc_ 克隆音色只有语音版（服务端转换引擎）能合，选中时自动切过去
+                            if v.hasPrefix("vc_"), !engineAudio {
+                                engineAudio = true
+                                await bridge.applyEngine(isAudio: true)
+                            }
+                            await bridge.applyVoice(v)
+                        }
                     }
                     Picker("语速", selection: $rate) {
                         ForEach(Self.rateNames.keys.sorted(), id: \.self) { Text(Self.rateNames[$0] ?? "").tag($0) }
@@ -125,8 +148,10 @@ struct ReaderSettingsPanel: View {
         }
     }
 
-    /// 拉页面偏好回填 UI；音色不在白名单（历史浏览器语音名）时保持默认映射
+    /// 先拉克隆音色清单再回填 UI（saved 是 vc_ 时选项得先在列表里）；
+    /// 音色名语音版存 ttsEdgeVoice、网页版存 ttsVoiceName，按当前引擎各读各的
     private func fill() async {
+        await loadCloneVoices()
         let p = await bridge.sync()
         let s: (String, String) -> String = { (p[$0] as? String) ?? $1 }
         // iOS 无浏览器 TTS，注入脚本已预置语音版；读不到时按同源缺省处理
@@ -140,8 +165,20 @@ struct ReaderSettingsPanel: View {
         learnLang = s("learnLang", "中文")
         learnAge = s("learnAge", "9")
         pinyin = s("pinyinMode", "0") == "1"
-        let saved = s("ttsVoiceName", "")
-        if Voice.allCases.contains(where: { $0.rawValue == saved }) { voiceId = saved }
+        let savedEdge = s("ttsEdgeVoice", "")
+        let savedBrowser = s("ttsVoiceName", "")
+        let saved = engineAudio ? (savedEdge.isEmpty ? savedBrowser : savedEdge) : savedBrowser
+        let known = Voice.allCases.contains(where: { $0.rawValue == saved })
+            || cloneVoices.contains(where: { $0.id == saved })
+        if known { voiceId = saved }
         syncing = false
+    }
+
+    /// 桥接不可用/旧后端没有此端点时静默空列表：隐藏选项组，不影响其余设置
+    private func loadCloneVoices() async {
+        guard cloneVoices.isEmpty else { return }
+        if let resp = try? await APIClient.shared.get(TtsVoicesResponse.self, Endpoint.ttsVoices, timeout: 10) {
+            cloneVoices = resp.ok ? (resp.voices ?? []) : []
+        }
     }
 }

@@ -196,6 +196,7 @@ final class ReaderSiteBridge: ObservableObject {
             ttsRate: g('ttsRate', '1'),
             ttsGap: g('ttsGap', '250'),
             ttsVoiceName: g('ttsVoiceName', ''),
+            ttsEdgeVoice: g('ttsEdgeVoice', ''),
             ttsAutoNext: g('ttsAutoNext', '0'),
             ttsKeepScreenOn: g('ttsKeepScreenOn', '0'),
             pinyinMode: g('pinyinMode', '0'),
